@@ -1,0 +1,17 @@
+{
+  // https://developers.cloudflare.com/workers/wrangler/configuration/
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "spordo",
+  "main": "src/index.js",
+  "compatibility_date": "2026-06-24",
+  "observability": {
+    "enabled": true
+  },
+  // Static assets (the HTML app) are served from ./public.
+  // The ASSETS binding lets src/index.js fetch them.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page"
+  }
+}
