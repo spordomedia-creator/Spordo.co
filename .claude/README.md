@@ -8,6 +8,7 @@ Project-scoped Claude Code helpers for building SPORDO from prototype to product
 
 | Command | What it does |
 | --- | --- |
+| `/build-loop [focus]` | Run the autonomous prototype→production improvement loop (audit → research → plan → implement → review/ship, repeat), delegating to the engineer agents and gating each cycle on passing tests. Tracks progress in a `docs/loop/` ledger. Optional arg biases which slice it tackles first. |
 | `/save [summary]` | Stage all changes, write a Conventional-Commit message, and push to `main`. Optional arg gives commit intent. |
 | `/deploy [--dry-run]` | Validate the Worker (`wrangler deploy --dry-run`) then deploy. Canonical deploy is still pushing to `main` (GitHub Action). |
 
@@ -32,6 +33,8 @@ Loaded automatically when relevant.
 | `nyc-open-data` | Socrata/SoQL reference: datasets `tvpp-9vvx` & `erm2-nwe9`, query patterns, gotchas. |
 
 ## Typical loop
+
+Run `/build-loop` to drive the whole cycle automatically, or do it by hand:
 
 1. Plan a slice (the `spordo-architecture` skill informs scope/ownership).
 2. Delegate to the right engineer agent.
