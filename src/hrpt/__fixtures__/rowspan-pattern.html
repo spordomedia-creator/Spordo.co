@@ -1,0 +1,54 @@
+<!--
+  Synthetic fixture modeling PATTERN A of the HRPT permits page: a merged
+  visual block for a run of booked slots is expressed via a single <td>
+  carrying rowspan, with the following rows omitting a <td> for that
+  column entirely (standard HTML table semantics).
+
+  This has NOT been validated against a real fetch of hudsonriverpark.org
+  (this sandbox cannot reach that host) -- it exists to prove the parser
+  handles this pattern correctly, in parallel with repeated-cell-pattern.html
+  which encodes the same logical schedule via the other plausible markup
+  shape. See src/hrpt/parser.test.js, which asserts both fixtures produce
+  identical normalized output for the shared "Pier 25" field.
+-->
+<html>
+<body>
+  <h1>Field Permit Schedule: June 28 &ndash; July 5, 2026</h1>
+
+  <div id="pier25">
+    <h3>Pier 25 Artificial Turf Field</h3>
+    <table>
+      <tbody>
+        <tr><td></td><td>Jun 28</td><td>Jun 29</td></tr>
+        <tr><td>9:00 AM</td><td></td><td></td></tr>
+        <tr><td>9:30 AM</td><td></td><td></td></tr>
+        <tr><td>10:00 AM</td><td rowspan="2" class="permitted">10:00 AM&ndash;11:00 AM</td><td></td></tr>
+        <tr><td>10:30 AM</td><td rowspan="3" class="permitted"></td></tr>
+        <tr><td>11:00 AM</td><td></td></tr>
+        <tr><td>11:30 AM</td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div id="gansevoort">
+    <h3>Gansevoort Peninsula Athletic Field</h3>
+    <table>
+      <tbody>
+        <tr><td></td><td>Jun 28</td><td>Jun 29</td></tr>
+        <tr><td>9:00 AM</td><td></td><td></td></tr>
+        <tr><td>9:30 AM</td><td></td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div id="mystery">
+    <p>Some layout text with no recognizable heading tag before the table.</p>
+    <table>
+      <tbody>
+        <tr><td></td><td>Jun 28</td><td>Jun 29</td></tr>
+        <tr><td>9:00 AM</td><td></td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>

@@ -13,5 +13,23 @@
     "directory": "./public",
     "binding": "ASSETS",
     "not_found_handling": "404-page"
+  },
+  // Scheduled sync jobs. Every 3 hours is a "good citizen" cadence for
+  // hudsonriverpark.org (it's never cached upstream per its response
+  // headers, but there's no reason to hammer it more often than field
+  // availability actually changes) — see src/index.js `scheduled()` and
+  // src/hrpt/sync.js. Adjust here if the cadence needs to change; it's the
+  // only place the schedule is defined.
+  "triggers": {
+    "crons": ["0 */3 * * *"]
+  },
+  // Non-secret config the sync jobs read via `env`. The write path also
+  // requires a Supabase SERVICE ROLE key, which must be set as a Wrangler
+  // secret (never committed): `wrangler secret put SUPABASE_SERVICE_ROLE_KEY`.
+  // SUPABASE_URL below matches the project the frontend already reads from
+  // (see SUPABASE_URL in public/TrueSpordo.html) — the anon key used there
+  // is read-only by RLS design and must not be reused for server-side writes.
+  "vars": {
+    "SUPABASE_URL": "https://avwvtjsabmhqqeosqubw.supabase.co"
   }
 }

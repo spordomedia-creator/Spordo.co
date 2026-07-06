@@ -11,6 +11,7 @@ wrangler.toml.bak
 .env
 .env.*
 !.env.example
+!.dev.vars.example
 
 # Build output
 dist/

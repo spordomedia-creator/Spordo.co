@@ -1,0 +1,7 @@
+# Copy to .dev.vars for local `wrangler dev` / `wrangler dev --test-scheduled`.
+# Never commit the real values (.dev.vars is gitignored).
+
+# Service-role key for the same Supabase project configured in
+# wrangler.jsonc's `vars.SUPABASE_URL`. Server-side only — never expose
+# this in client code (the frontend uses the public anon key instead).
+SUPABASE_SERVICE_ROLE_KEY=
