@@ -20,10 +20,10 @@
 import { HRPT_PERMITS_URL, HRPT_FETCH_HEADERS, HRPT_SOURCE_LABEL, FIELD_PERMIT_CACHE_TABLE, FIELD_SYNC_META_TABLE } from "./config.js";
 import { parseHrptPermitsHtml } from "./parser.js";
 import { resolveFieldId } from "./fieldMap.js";
-import { replaceFieldPermitWindow, upsertSyncMeta } from "./supabaseClient.js";
+import { replaceFieldPermitWindow, upsertSyncMeta } from "./d1Client.js";
 
 /**
- * @param {any} env Worker environment (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+ * @param {any} env Worker environment (env.DB — the D1 binding configured in wrangler.jsonc)
  * @param {{
  *   fetchImpl?: typeof fetch,
  *   now?: () => Date,
@@ -120,7 +120,6 @@ async function runHrptSync(env, opts = {}) {
         minDate: dateWindow.minDate,
         maxDate: dateWindow.maxDate,
         rows: fieldRows,
-        fetchImpl,
       });
 
       await upsertSyncMeta(env, {
@@ -131,7 +130,6 @@ async function runHrptSync(env, opts = {}) {
           live_availability_status: "synced",
           permit_source_url: HRPT_PERMITS_URL,
         },
-        fetchImpl,
       });
 
       summary.fieldsWritten += 1;

@@ -1,7 +1,12 @@
 # Copy to .dev.vars for local `wrangler dev` / `wrangler dev --test-scheduled`.
 # Never commit the real values (.dev.vars is gitignored).
-
-# Service-role key for the same Supabase project configured in
-# wrangler.jsonc's `vars.SUPABASE_URL`. Server-side only — never expose
-# this in client code (the frontend uses the public anon key instead).
-SUPABASE_SERVICE_ROLE_KEY=
+#
+# The HRPT sync's storage backend is Cloudflare D1 (see the `d1_databases`
+# binding in wrangler.jsonc), accessed via the `env.DB` Workers binding —
+# not a REST URL + bearer token, so there is no secret to set here for it.
+# `wrangler dev` automatically provisions a local D1 simulation for the
+# `DB` binding; run `wrangler d1 migrations apply spordo-hrpt --local` once
+# to apply migrations/0001_init.sql to it.
+#
+# (No vars currently required here. This file is kept as the place to add
+# any future local-dev secrets.)
