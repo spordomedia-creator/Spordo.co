@@ -50,7 +50,7 @@
     {
       "binding": "DB",
       "database_name": "spordo-hrpt",
-      "database_id": "REPLACE_WITH_REAL_DATABASE_ID",
+      "database_id": "af3f5a92-9c55-4195-915c-22f0a0746d34",
       "migrations_dir": "migrations"
     }
   ]
