@@ -19,6 +19,25 @@ test("resolves a known live-page alias to the current field_id", () => {
   assert.equal(result.fieldId, EXACT_NAME_TO_FIELD_ID["Gansevoort Peninsula Playing Field"]);
 });
 
+test("strips the live page's trailing 'Schedule' suffix before matching an exact name", () => {
+  const result = resolveFieldId("Chelsea Waterside Athletic Field Schedule");
+  assert.equal(result.matchType, "exact");
+  assert.equal(result.fieldId, EXACT_NAME_TO_FIELD_ID["Chelsea Waterside Athletic Field"]);
+});
+
+test("strips the live page's trailing 'Schedule' suffix before matching an alias", () => {
+  const result = resolveFieldId("Gansevoort Peninsula Athletic Field Schedule");
+  assert.equal(result.matchType, "alias");
+  assert.equal(result.fieldId, EXACT_NAME_TO_FIELD_ID["Gansevoort Peninsula Playing Field"]);
+});
+
+test("resolves the live page's 'Field'-less Courtyard East/West names via alias", () => {
+  const east = resolveFieldId("Pier 40 Courtyard East Schedule");
+  const west = resolveFieldId("Pier 40 Courtyard West Schedule");
+  assert.equal(east.fieldId, EXACT_NAME_TO_FIELD_ID["Pier 40 Courtyard East Field"]);
+  assert.equal(west.fieldId, EXACT_NAME_TO_FIELD_ID["Pier 40 Courtyard West Field"]);
+});
+
 test("returns null (does not guess) for an unrecognized name", () => {
   assert.equal(resolveFieldId("Some Brand New Field Nobody Has Heard Of"), null);
 });

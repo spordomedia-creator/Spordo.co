@@ -87,12 +87,30 @@ const ALIASES = [
     fieldId: EXACT_NAME_TO_FIELD_ID["Pier 25 Artificial Turf Field"],
     note: "Live page's shorter name assumed to refer to the same field as our 'Artificial Turf Field'.",
   },
+  {
+    pageName: "Pier 40 Courtyard East",
+    fieldId: EXACT_NAME_TO_FIELD_ID["Pier 40 Courtyard East Field"],
+    note: "Live page omits the trailing 'Field' word our DB name has. Assumed same physical field.",
+  },
+  {
+    pageName: "Pier 40 Courtyard West",
+    fieldId: EXACT_NAME_TO_FIELD_ID["Pier 40 Courtyard West Field"],
+    note: "Live page omits the trailing 'Field' word our DB name has. Assumed same physical field.",
+  },
 ];
 
 const ALIAS_NAME_TO_FIELD_ID = Object.fromEntries(ALIASES.map((a) => [a.pageName, a.fieldId]));
 
 function normalize(name) {
-  return name.trim().toLowerCase().replace(/\s+/g, " ");
+  // The live page's table caption is always "<field name> Schedule" (e.g.
+  // "Pier 25 Turf Field Schedule"), a suffix none of the DB names or
+  // aliases above include — strip it so every entry above only has to name
+  // the field itself, not the page's caption wording around it.
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/\s+schedule$/, "");
 }
 
 const NORMALIZED_EXACT = new Map(Object.entries(EXACT_NAME_TO_FIELD_ID).map(([k, v]) => [normalize(k), v]));
