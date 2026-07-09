@@ -62,8 +62,23 @@ function parseTableToGrid(tableHtml) {
   }
 
   const rowCells = rows.map((row) => extractCells(row.innerHTML));
+  // A row is "header-only" if every cell came from a <th> (no <td> at all).
+  // Some live pages render a full-width banner row (e.g. a single
+  // <th colspan="N"> wrapping a heading image) ahead of the actual
+  // "corner + date cells" header row — both are <th>-only, so picking just
+  // "the first row" would grab the banner instead. Walk the leading run of
+  // <th>-only rows and use the last one with more than one cell as the real
+  // header; a banner row spanning the full width via colspan will only ever
+  // have a single cell. Pages with just one plain header row (the common
+  // case, and what the test fixtures use) still resolve to that same row.
+  const rowIsHeaderOnly = rows.map((row) => extractElements(row.innerHTML, "td").length === 0);
+  let headerIdx = 0;
+  for (let i = 0; i < rowIsHeaderOnly.length && rowIsHeaderOnly[i]; i++) {
+    if (rowCells[i].length > 1) headerIdx = i;
+  }
 
-  const [headerRow, ...bodyRows] = rowCells;
+  const headerRow = rowCells[headerIdx];
+  const bodyRows = rowCells.slice(headerIdx + 1);
   // The header row's first cell is the sticky "corner" (blank or a label
   // like "Time"); the remaining cells are the day-column headers.
   const columnHeaders = headerRow.slice(1).map((c) => c.text);

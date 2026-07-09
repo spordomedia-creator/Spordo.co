@@ -60,6 +60,30 @@ test("repeated-class pattern expands to the SAME dense grid as rowspan", () => {
   assert.deepEqual(repeatedResult.columnHeaders, rowspanResult.columnHeaders);
 });
 
+const BANNER_PLUS_HEADER_TABLE = `
+  <table>
+    <thead>
+      <tr><th colspan="3"><img src="heading.png" alt="Pier 25 Turf Field" /></th></tr>
+      <tr><th>Time</th><th>Sun<br /> 7/5</th><th>Mon<br /> 7/6</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>6:00 AM</td><td></td><td></td></tr>
+      <tr><td>7:00 AM</td><td class="permitted">League A</td><td></td></tr>
+    </tbody>
+  </table>
+`;
+
+test("a full-width <th colspan> banner row ahead of the real <th> header row is skipped, not mistaken for the header", () => {
+  const { columnHeaders, rowLabels, grid, anomalies } = parseTableToGrid(BANNER_PLUS_HEADER_TABLE);
+  assert.deepEqual(columnHeaders, ["Sun 7/5", "Mon 7/6"]);
+  assert.deepEqual(rowLabels, ["6:00 AM", "7:00 AM"]);
+  assert.deepEqual(anomalies, []);
+  assert.deepEqual(statusGrid(grid), [
+    ["available", "available"],
+    ["booked", "available"],
+  ]);
+});
+
 test("logs an anomaly (not a throw) when a row has fewer cells than expected", () => {
   const html = `
     <table>
