@@ -5024,9 +5024,11 @@ function renderSchdBody() {
     el.innerHTML = `
       <div class="schd-ext-card">
         <div style="margin-bottom:12px"><span class="source-badge">${esc(f.orgShort)}</span></div>
-        <div class="ext-note" style="margin-bottom:20px">This field is managed by <strong>${esc(f.org)}</strong>, which operates its own independent permit system outside NYC Parks. Spordo does not have access to their live availability data.</div>
+        <div class="ext-note" style="margin-bottom:20px">This field is managed by <strong>${esc(f.operator)}</strong>, which operates its own independent permit system outside NYC Parks.</div>
         <a class="ext-book-btn" href="${esc(f.bookingUrl)}" target="_blank" rel="noopener">Book at ${esc(f.orgShort)} →</a>
+        <div id="ext-permit-info" style="margin-top:20px"></div>
       </div>`;
+    loadPermitInfoCard(f, document.getElementById('ext-permit-info'));
     return;
   }
 
@@ -5835,34 +5837,17 @@ async function initSupabase() {
 
 /* ── PERMIT INFO ─────────────────────────────────── */
 
-// Fetch sync meta for a field from Supabase (public read, no auth needed)
-async function fetchPermitMeta(fieldId) {
+// Fetch sync meta + upcoming cached permits for a field from our own
+// same-origin /api/permits/:fieldId endpoint (src/permitsApi.js), which
+// reads Cloudflare D1 server-side. One request returns both together.
+async function fetchPermitsPayload(fieldId) {
   try {
-    const { data, error } = await _sb
-      .from('field_sync_meta')
-      .select('*')
-      .eq('field_id', fieldId)
-      .maybeSingle();
-    if (error) return null;
-    return data;
-  } catch(e) { return null; }
-}
-
-// Fetch upcoming cached permits for a field
-async function fetchCachedPermits(fieldId) {
-  try {
-    const today = new Date().toISOString().split('T')[0];
-    const { data, error } = await _sb
-      .from('field_permit_cache')
-      .select('permit_date,start_time,end_time,event_name')
-      .eq('field_id', fieldId)
-      .gte('permit_date', today)
-      .order('permit_date', { ascending: true })
-      .order('start_time',  { ascending: true })
-      .limit(10);
-    if (error) return [];
-    return data || [];
-  } catch(e) { return []; }
+    const r = await fetch(`/api/permits/${encodeURIComponent(fieldId)}`);
+    if (!r.ok) return { meta: null, permits: [] };
+    return await r.json();
+  } catch(e) {
+    return { meta: null, permits: [] };
+  }
 }
 
 function _fmtSyncDate(iso) {
@@ -5894,13 +5879,15 @@ async function loadPermitInfoCard(field, containerEl) {
     <div class="permit-info-row" style="color:var(--c-w30)">Loading…</div>
   </div>`;
 
-  const [meta, cachedPermits] = await Promise.all([
-    fetchPermitMeta(field.id),
-    fetchCachedPermits(field.id)
-  ]);
+  const { meta, permits: cachedPermits } = await fetchPermitsPayload(field.id);
 
   const isHRPT    = field.external || (field.operator || '').includes('Hudson River');
-  const unavail   = isHRPT || meta?.live_availability_status === 'not_publicly_available';
+  // A field only counts as "unavailable" when we genuinely have no synced
+  // data for it yet (no meta row at all) or the sync explicitly flagged it
+  // as not publicly published — NOT just because it's an HRPT/external
+  // field. HRPT's schedule is scraped into D1 now (src/hrpt/), so treating
+  // every HRPT field as blanket-unavailable would hide real synced data.
+  const unavail   = !meta || meta?.live_availability_status === 'not_publicly_available';
   const stale     = !unavail && _isStale(meta?.last_permit_sync_at);
   const syncDate  = _fmtSyncDate(meta?.last_permit_sync_at);
   const sourceUrl = meta?.permit_source_url

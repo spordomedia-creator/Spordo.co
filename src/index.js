@@ -7,6 +7,9 @@
  * us route "/" to the main app without renaming the source file.
  */
 import { runHrptSync } from "./hrpt/sync.js";
+import { handlePermitsRequest } from "./permitsApi.js";
+
+const PERMITS_API_PREFIX = "/api/permits/";
 
 export default {
   async fetch(request, env) {
@@ -16,6 +19,12 @@ export default {
     if (url.pathname === "/" || url.pathname === "") {
       url.pathname = "/TrueSpordo.html";
       return env.ASSETS.fetch(new Request(url, request));
+    }
+
+    // Cached-permit read API for the field-detail page (see permitsApi.js).
+    if (url.pathname.startsWith(PERMITS_API_PREFIX)) {
+      const fieldId = decodeURIComponent(url.pathname.slice(PERMITS_API_PREFIX.length));
+      return handlePermitsRequest(env, fieldId);
     }
 
     // Everything else falls through to the static-asset runtime.
