@@ -43,6 +43,18 @@ Full reasoning lives in the code comments (`src/hrpt/tableGrid.js`, `src/hrpt/fi
 - A benign, unfixed "block 0, found 10 tables" anomaly logs every run (likely a duplicate responsive-layout view) — doesn't lose data, not worth guess-fixing without more evidence.
 - If HRPT sync writes 0 rows: check a local `--test-scheduled` run before suspecting infra. Both real incidents so far were parsing/mapping bugs, not Cloudflare/D1 problems.
 
+## HRPT data is now displayed, not just collected
+
+- `GET /api/permits/:fieldId` (`src/permitsApi.js`) reads D1 server-side and returns `{meta, permits}` — the browser can't reach D1 directly (unlike Supabase's public REST API), so this route exists specifically for that.
+- HRPT fields render through the **same** `renderSchdWeek`/`renderSchdMonth` grid every other field uses (`public/TrueSpordo.html`), not a separate component — `_hrptRowToPermit()` adapts a D1 row into the same shape a Socrata permit object already has (`start_date_time`/`end_date_time`/`event_name`) so the existing badge/label helpers work unmodified. Data is fetched once per field and cached on the field object (`f._permitsLoaded`).
+- `isBareTimeFragment()` (`src/hrpt/dateTime.js`) suppresses a booked cell's raw text (e.g. `"9:00 AM–"`) from becoming a fake `event_name` when it's just the block's own start time echoed back with no real label — parser-only fix, so already-cached bad rows clear on the next sync (~3h), not instantly.
+
+## CI (`.github/workflows/deploy.yml`)
+
+- Needs Node **22+** (`wrangler` `^4.20.0` requires it) — Node 20 makes `cloudflare/wrangler-action` silently fall back to an ancient wrangler that can't read `wrangler.jsonc`'s `main` field.
+- Needs repo secrets `CLOUDFLARE_API_TOKEN` (the **"Edit Cloudflare Workers"** dashboard template — covers D1 too) and `CLOUDFLARE_ACCOUNT_ID`, or every deploy fails with "must set a CLOUDFLARE_API_TOKEN". Both were missing from repo creation until fixed this session — check `Settings → Secrets and variables → Actions` if CI ever regresses.
+- A GitHub PAT needs the **`workflow`** scope specifically to push changes to files under `.github/workflows/` — a `repo`-only-scoped token gets rejected with "refusing to allow a Personal Access Token to create or update workflow ... without `workflow` scope".
+
 ## If git push / wrangler deploy fail in a sandboxed session
 
 Some remote environments block both the local git proxy push *and* the GitHub App integration's write access, and have no authenticated `wrangler` CLI (egress policy blocks `api.cloudflare.com` directly) — this is structural, not a missing credential. Confirm with `git push` and a `mcp__github__push_files` test before assuming it's fixed.
