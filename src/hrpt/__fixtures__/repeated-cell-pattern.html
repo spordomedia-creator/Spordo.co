@@ -1,0 +1,51 @@
+<!--
+  Synthetic fixture modeling PATTERN B of the HRPT permits page: a merged
+  visual block for a run of booked slots is expressed via literal,
+  un-labeled adjacent <td class="permitted"> cells (no rowspan at all) --
+  the run's label text (if any) appears only on the first cell.
+
+  Encodes the SAME logical schedule as rowspan-pattern.html for the shared
+  "Pier 25" field, so the parser test can assert identical normalized
+  output regardless of which markup shape the real page turns out to use.
+-->
+<html>
+<body>
+  <h1>Field Permit Schedule: June 28 &ndash; July 5, 2026</h1>
+
+  <div id="pier25">
+    <h3>Pier 25 Artificial Turf Field</h3>
+    <table>
+      <tbody>
+        <tr><td></td><td>Jun 28</td><td>Jun 29</td></tr>
+        <tr><td>9:00 AM</td><td></td><td></td></tr>
+        <tr><td>9:30 AM</td><td></td><td></td></tr>
+        <tr><td>10:00 AM</td><td class="permitted">10:00 AM&ndash;11:00 AM</td><td></td></tr>
+        <tr><td>10:30 AM</td><td class="permitted"></td><td class="permitted"></td></tr>
+        <tr><td>11:00 AM</td><td></td><td class="permitted"></td></tr>
+        <tr><td>11:30 AM</td><td></td><td class="permitted"></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div id="gansevoort">
+    <h3>Gansevoort Peninsula Athletic Field</h3>
+    <table>
+      <tbody>
+        <tr><td></td><td>Jun 28</td><td>Jun 29</td></tr>
+        <tr><td>9:00 AM</td><td></td><td></td></tr>
+        <tr><td>9:30 AM</td><td></td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div id="mystery">
+    <p>Some layout text with no recognizable heading tag before the table.</p>
+    <table>
+      <tbody>
+        <tr><td></td><td>Jun 28</td><td>Jun 29</td></tr>
+        <tr><td>9:00 AM</td><td></td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>

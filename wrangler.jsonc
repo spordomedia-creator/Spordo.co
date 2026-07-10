@@ -13,5 +13,45 @@
     "directory": "./public",
     "binding": "ASSETS",
     "not_found_handling": "404-page"
-  }
+  },
+  // Scheduled sync jobs. Every 3 hours is a "good citizen" cadence for
+  // hudsonriverpark.org (it's never cached upstream per its response
+  // headers, but there's no reason to hammer it more often than field
+  // availability actually changes) — see src/index.js `scheduled()` and
+  // src/hrpt/sync.js. Adjust here if the cadence needs to change; it's the
+  // only place the schedule is defined.
+  "triggers": {
+    "crons": ["0 */3 * * *"]
+  },
+  // D1 binding for the HRPT permit-sync pipeline (src/hrpt/d1Client.js,
+  // src/hrpt/sync.js). D1 is reached at runtime via this binding
+  // (env.DB.prepare(...).bind(...).run()/.batch()) — there's no URL or API
+  // secret to configure here (unlike the Supabase REST client this
+  // replaced); access is controlled entirely by this binding existing in
+  // the Worker's deployment.
+  //
+  // NOTE: `database_id` below is a placeholder. This sandbox has no real
+  // Cloudflare account access, so the database has not been provisioned
+  // yet. Whoever has real Cloudflare access needs to, once:
+  //   1. Create the database:
+  //        wrangler d1 create spordo-hrpt
+  //      This prints a `database_id` (a UUID) — paste it in below,
+  //      replacing "REPLACE_WITH_REAL_DATABASE_ID".
+  //   2. Apply the schema migration (migrations/0001_init.sql):
+  //        wrangler d1 migrations apply spordo-hrpt --remote
+  //      (add/also run with `--local` for local `wrangler dev` testing)
+  //   3. Redeploy so the binding takes effect: `wrangler deploy`
+  //
+  // Scoped only to the HRPT sync pipeline right now — this does NOT touch
+  // the Supabase project the frontend (public/TrueSpordo.html) still uses
+  // for auth and the DPR/NYC-Parks permit reads; that migration is
+  // deliberately separate and hasn't happened here.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "spordo-hrpt",
+      "database_id": "af3f5a92-9c55-4195-915c-22f0a0746d34",
+      "migrations_dir": "migrations"
+    }
+  ]
 }

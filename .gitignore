@@ -11,6 +11,7 @@ wrangler.toml.bak
 .env
 .env.*
 !.env.example
+!.dev.vars.example
 
 # Build output
 dist/
@@ -28,3 +29,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Agent worktree scratch space
+.claude/worktrees/
