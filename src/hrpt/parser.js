@@ -23,6 +23,7 @@ import {
   parseTimeLabel,
   formatTime,
   parseExplicitRangeLabel,
+  isBareTimeFragment,
   inferSlotIntervalMinutes,
 } from "./dateTime.js";
 
@@ -192,7 +193,13 @@ function emitRun({ fieldNameOnPage, date, grid, col, startRow, endRowExclusive, 
           endMinutes
         )}); used row-derived bounds instead`
       );
-    } else if (!eventName) {
+    } else if (!eventName && !isBareTimeFragment(text)) {
+      // A cell whose only text is a bare time (e.g. "9:00 AM–") isn't a
+      // real event label — it's just the block's own start time echoed
+      // back, conveying nothing the row position doesn't already give us.
+      // Leaving eventName null here (not logged as an anomaly: this is a
+      // routine, expected shape, not a fault) lets it fall through to the
+      // `event_name: eventName || null` default below.
       eventName = text;
     }
     break;

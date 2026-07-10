@@ -156,6 +156,23 @@ function parseExplicitRangeLabel(text) {
   return { startMinutes, endMinutes, remainder };
 }
 
+/**
+ * True when `text` is nothing but a bare time (optionally with AM/PM,
+ * optionally followed by a trailing dash) and carries no other content —
+ * e.g. "9:00 AM–", "8:30 AM", "7:00–". These show up as a booked cell's own
+ * text when the page renders just a start-time label inside the colored
+ * block rather than a full "start–end" range parseExplicitRangeLabel can
+ * match; the row position already gives us that same start time, so using
+ * this verbatim as an event name would just echo it back as a dangling
+ * fragment. A genuine label that happens to start with a time (e.g. "9:00
+ * AM Practice") has trailing content after the optional dash and does not
+ * match.
+ */
+function isBareTimeFragment(text) {
+  const re = /^\s*\d{1,2}(?::\d{2})?\s*(?:[AaPp][Mm])?\s*[–—-]?\s*$/;
+  return !!text && re.test(text);
+}
+
 /** Compute the modal/minimum positive gap between sorted row start times. */
 function inferSlotIntervalMinutes(sortedMinutes) {
   const diffs = [];
@@ -173,5 +190,6 @@ export {
   parseTimeLabel,
   formatTime,
   parseExplicitRangeLabel,
+  isBareTimeFragment,
   inferSlotIntervalMinutes,
 };

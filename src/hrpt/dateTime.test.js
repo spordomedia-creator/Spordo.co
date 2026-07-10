@@ -6,6 +6,7 @@ import {
   parseTimeLabel,
   formatTime,
   parseExplicitRangeLabel,
+  isBareTimeFragment,
   inferSlotIntervalMinutes,
 } from "./dateTime.js";
 
@@ -62,6 +63,25 @@ test("parseExplicitRangeLabel parses a full range and inherits the period when o
 test("parseExplicitRangeLabel returns null for non-range text", () => {
   assert.equal(parseExplicitRangeLabel("Private Event"), null);
   assert.equal(parseExplicitRangeLabel(""), null);
+});
+
+test("isBareTimeFragment recognizes a dangling time with nothing else as text", () => {
+  assert.equal(isBareTimeFragment("9:00 AM–"), true);
+  assert.equal(isBareTimeFragment("8:30 AM–"), true);
+  assert.equal(isBareTimeFragment("7:00 PM–"), true);
+  assert.equal(isBareTimeFragment("2:00 PM–"), true);
+  assert.equal(isBareTimeFragment("9:00–"), true); // no AM/PM
+  assert.equal(isBareTimeFragment("9:00 AM"), true); // no trailing dash
+  assert.equal(isBareTimeFragment("9:00 AM—"), true); // em dash variant
+});
+
+test("isBareTimeFragment does not suppress real labels, even ones starting with a time", () => {
+  assert.equal(isBareTimeFragment("Private Event"), false);
+  assert.equal(isBareTimeFragment("Soccer - Non Regulation"), false);
+  assert.equal(isBareTimeFragment("9:00 AM Practice"), false);
+  assert.equal(isBareTimeFragment("10:00 AM–11:00 AM"), false); // a genuine full range
+  assert.equal(isBareTimeFragment(""), false);
+  assert.equal(isBareTimeFragment(null), false);
 });
 
 test("inferSlotIntervalMinutes finds the minimum positive gap", () => {

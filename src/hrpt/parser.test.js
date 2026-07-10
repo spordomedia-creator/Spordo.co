@@ -58,3 +58,47 @@ test("a block with no discoverable heading is skipped, not guessed, and logged a
   assert.equal(fieldsFound.some((f) => f.fieldNameOnPage === null), false);
   assert.ok(anomalies.some((a) => a.includes("mystery") && a.includes("no heading")));
 });
+
+test("a booked cell whose only text is a dangling bare time (no matching end) does not become event_name", () => {
+  const html = `
+    <html><body>
+      <h1>Field Permit Schedule: June 28 &ndash; July 5, 2026</h1>
+      <div id="testfield">
+        <h3>Test Field</h3>
+        <table>
+          <tbody>
+            <tr><td></td><td>Jun 28</td></tr>
+            <tr><td>9:00 AM</td><td class="permitted">9:00 AM&ndash;</td></tr>
+            <tr><td>9:30 AM</td><td></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </body></html>`;
+  const { rows } = parseHrptPermitsHtml(html, { referenceDate: REFERENCE_DATE });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].start_time, "09:00:00");
+  assert.equal(rows[0].end_time, "09:30:00");
+  // The raw cell text ("9:00 AM–") merely echoes the row's own start time
+  // and isn't a real label — must NOT be stored verbatim.
+  assert.equal(rows[0].event_name, null);
+});
+
+test("a real label that happens to start with a time is still used as event_name", () => {
+  const html = `
+    <html><body>
+      <h1>Field Permit Schedule: June 28 &ndash; July 5, 2026</h1>
+      <div id="testfield">
+        <h3>Test Field</h3>
+        <table>
+          <tbody>
+            <tr><td></td><td>Jun 28</td></tr>
+            <tr><td>9:00 AM</td><td class="permitted">9:00 AM Practice</td></tr>
+            <tr><td>9:30 AM</td><td></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </body></html>`;
+  const { rows } = parseHrptPermitsHtml(html, { referenceDate: REFERENCE_DATE });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].event_name, "9:00 AM Practice");
+});
