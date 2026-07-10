@@ -5021,14 +5021,39 @@ function renderSchdBody() {
   if (!f || !el) return;
 
   if (f.external) {
-    el.innerHTML = `
-      <div class="schd-ext-card">
+    // Same "managed externally" disclaimer + booking link as before; the
+    // schedule itself below it now renders through the exact same
+    // renderSchdWeek/renderSchdMonth grid every other field uses, instead
+    // of a separately-styled card, once real data has been fetched once
+    // per field (see loadExternalPermits).
+    const banner = `
+      <div class="schd-ext-card" style="margin-bottom:20px">
         <div style="margin-bottom:12px"><span class="source-badge">${esc(f.orgShort)}</span></div>
-        <div class="ext-note" style="margin-bottom:20px">This field is managed by <strong>${esc(f.operator)}</strong>, which operates its own independent permit system outside NYC Parks.</div>
-        <a class="ext-book-btn" href="${esc(f.bookingUrl)}" target="_blank" rel="noopener">Book at ${esc(f.orgShort)} →</a>
-        <div id="ext-permit-info" style="margin-top:20px"></div>
+        <div class="ext-note">This field is managed by <strong>${esc(f.operator)}</strong>, which operates its own independent permit system outside NYC Parks.</div>
+        <a class="ext-book-btn" href="${esc(f.bookingUrl)}" target="_blank" rel="noopener" style="margin-top:16px">Book at ${esc(f.orgShort)} →</a>
       </div>`;
-    loadPermitInfoCard(f, document.getElementById('ext-permit-info'));
+
+    if (!f._permitsLoaded) {
+      el.innerHTML = banner + `<div class="schd-week-none" style="padding:40px 0">Loading schedule…</div>`;
+      // Guard against a second concurrent fetch if the user toggles
+      // WEEK/MONTH again before the first one finishes.
+      if (!f._permitsLoading) {
+        f._permitsLoading = true;
+        loadExternalPermits(f).then(() => {
+          f._permitsLoading = false;
+          // Only re-render if the user hasn't navigated to a different
+          // field while the fetch was in flight.
+          if (S.activeField === f) renderSchdBody();
+        });
+      }
+      return;
+    }
+
+    if (S.panelView === 'month') {
+      renderSchdMonth(f, banner);
+    } else {
+      renderSchdWeek(f, banner);
+    }
     return;
   }
 
@@ -5089,7 +5114,7 @@ function renderSchdDay(f) {
     </div>`;
 }
 
-function renderSchdWeek(f) {
+function renderSchdWeek(f, prefixHtml = '') {
   const el = document.getElementById('schd-body');
   const base = new Date(); base.setHours(0,0,0,0);
   const DAY_NAMES = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
@@ -5118,10 +5143,10 @@ function renderSchdWeek(f) {
     </div>`;
   }).join('');
 
-  el.innerHTML = `<div class="schd-week-grid">${cols}</div>`;
+  el.innerHTML = prefixHtml + `<div class="schd-week-grid">${cols}</div>`;
 }
 
-function renderSchdMonth(f) {
+function renderSchdMonth(f, prefixHtml = '') {
   const el = document.getElementById('schd-body');
   if (!el) return;
   if (!S.monthViewDate) S.monthViewDate = new Date();
@@ -5161,7 +5186,7 @@ function renderSchdMonth(f) {
     </div>`;
   }
 
-  el.innerHTML = `
+  el.innerHTML = prefixHtml + `
     <div class="schd-month-nav">
       <button class="schd-month-btn" onclick="schdMonthNav(-1)">← PREV</button>
       <div class="schd-month-title">${MON_NAME[month].toUpperCase()} ${year}</div>
@@ -5850,97 +5875,27 @@ async function fetchPermitsPayload(fieldId) {
   }
 }
 
-function _fmtSyncDate(iso) {
-  if (!iso) return 'Never';
-  const d = new Date(iso);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+// Adapt one D1 field_permit_cache row ({permit_date, start_time, end_time,
+// event_name}) into the SAME shape a Socrata permit object has
+// (start_date_time/end_date_time/event_name — see groupByField/mockFields
+// above) so it renders through the exact same renderSchdWeek/renderSchdMonth
+// grid as every other field, instead of a separately-styled component.
+function _hrptRowToPermit(r) {
+  return {
+    start_date_time: r.permit_date + 'T' + (r.start_time || '00:00:00'),
+    end_date_time: r.end_time ? (r.permit_date + 'T' + r.end_time) : null,
+    event_name: r.event_name || 'Booked',
+  };
 }
 
-function _isStale(iso) {
-  if (!iso) return true;
-  return Date.now() - new Date(iso).getTime() > 8 * 86400000; // > 8 days
-}
-
-function _fmtPermitTime(row) {
-  const d = row.permit_date || '';
-  const s = row.start_time ? row.start_time.slice(0,5) : '';
-  const e = row.end_time   ? row.end_time.slice(0,5)   : '';
-  const label = new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric' });
-  return s ? `${label}  ${s}${e ? ' – ' + e : ''}` : label;
-}
-
-// Build and inject the Permit Info card into a container element
-async function loadPermitInfoCard(field, containerEl) {
-  if (!containerEl) return;
-
-  // Loading placeholder
-  containerEl.innerHTML = `<div class="permit-info-card">
-    <div class="permit-info-label">Permit Info</div>
-    <div class="permit-info-row" style="color:var(--c-w30)">Loading…</div>
-  </div>`;
-
-  const { meta, permits: cachedPermits } = await fetchPermitsPayload(field.id);
-
-  const isHRPT    = field.external || (field.operator || '').includes('Hudson River');
-  // A field only counts as "unavailable" when we genuinely have no synced
-  // data for it yet (no meta row at all) or the sync explicitly flagged it
-  // as not publicly published — NOT just because it's an HRPT/external
-  // field. HRPT's schedule is scraped into D1 now (src/hrpt/), so treating
-  // every HRPT field as blanket-unavailable would hide real synced data.
-  const unavail   = !meta || meta?.live_availability_status === 'not_publicly_available';
-  const stale     = !unavail && _isStale(meta?.last_permit_sync_at);
-  const syncDate  = _fmtSyncDate(meta?.last_permit_sync_at);
-  const sourceUrl = meta?.permit_source_url
-    || (isHRPT ? 'https://hudsonriverpark.org/visit/events/permits/fields/'
-               : 'https://data.cityofnewyork.us/resource/tvpp-9vvx.json');
-
-  const chipCls  = unavail ? 'unavail' : stale ? 'stale' : 'synced';
-  const chipText = unavail ? 'Not publicly available' : stale ? 'Data may be stale' : 'Synced';
-
-  const bookedHtml = cachedPermits.length
-    ? `<div class="permit-info-label" style="margin-top:4px">Known Booked Times</div>
-       <div class="permit-booked-list">
-         ${cachedPermits.map(r =>
-           `<div class="permit-booked-row">
-              <span class="permit-booked-dot"></span>
-              <span>${esc(_fmtPermitTime(r))}</span>
-              ${r.event_name ? `<span style="color:var(--c-w30)">· ${esc(r.event_name)}</span>` : ''}
-            </div>`).join('')}
-       </div>`
-    : unavail
-      ? ''
-      : `<div class="permit-info-row" style="color:var(--c-w30);font-size:12px">
-           No booked times cached for the next 14 days.
-         </div>`;
-
-  const staleWarn = stale && !unavail
-    ? `<div class="permit-stale-warn">⚠ Last sync was ${syncDate}. Data may be out of date — check the official source for real-time availability.</div>`
-    : '';
-
-  const hrptNote = unavail
-    ? `<div class="permit-info-row" style="font-size:12px">
-         Permit schedule is not published publicly by ${esc(field.operator || 'this operator')}.
-         Contact them directly to check availability.
-       </div>`
-    : '';
-
-  containerEl.innerHTML = `
-    <div class="permit-info-card">
-      <div class="permit-info-label">Permit Info</div>
-      <div class="permit-info-row">
-        <span class="permit-status-chip ${chipCls}">${esc(chipText)}</span>
-      </div>
-      ${hrptNote}
-      ${bookedHtml}
-      ${staleWarn}
-      <div class="permit-info-row" style="margin-top:2px">
-        <span style="color:var(--c-w30);font-size:12px">Last updated:</span>
-        <strong style="font-size:12px">${unavail ? 'N/A' : esc(syncDate)}</strong>
-      </div>
-      <a class="permit-source-link" href="${esc(sourceUrl)}" target="_blank" rel="noopener">
-        Check official availability ↗
-      </a>
-    </div>`;
+// Fetch an external (e.g. HRPT) field's real cached schedule once and cache
+// it directly on the field object, same lifetime as a normal field's
+// already-loaded f.permits — so switching WEEK/MONTH or navigating back to
+// this field later doesn't re-fetch.
+async function loadExternalPermits(f) {
+  const { permits } = await fetchPermitsPayload(f.id);
+  f.permits = (permits || []).map(_hrptRowToPermit);
+  f._permitsLoaded = true;
 }
 
 /* hero-h1 fade handled by intro animation */
