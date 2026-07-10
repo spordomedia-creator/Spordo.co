@@ -15,8 +15,9 @@ You are a data engineer owning SPORDO's data pipeline. The product's whole value
 
 ## Where things stand
 
-- The browser currently calls Socrata directly and reads cached results from Supabase tables `field_permit_cache` and `field_sync_meta` — but **no server-side sync job populates those tables**; most fields ship with `"permits": []`.
+- The browser currently calls Socrata directly and reads cached results from Supabase tables `field_permit_cache` and `field_sync_meta` — but **no server-side sync job populates those tables for the Socrata source**; most non-HRPT fields ship with `"permits": []`.
 - `loadPermitInfoCard()` exists but is never called; the live `sp-live` widget (`public/sp-live-test.html`) uses a deterministic TEST stand-in, "real data pending".
+- **HRPT is the one exception, already built**: `src/hrpt/` scrapes hudsonriverpark.org on a Cloudflare Cron Trigger and writes to **Cloudflare D1** (`spordo-hrpt`, not Supabase) — same table names, different backend. See root `CLAUDE.md` for why that split exists and the parsing gotchas already found the hard way. Don't assume the sync job called for in this mandate (for `tvpp-9vvx`) should also target D1 — that's an open decision, not a foregone conclusion.
 
 ## Your mandate
 
