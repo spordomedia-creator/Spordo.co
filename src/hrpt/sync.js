@@ -19,7 +19,7 @@
 
 import { HRPT_PERMITS_URL, HRPT_FETCH_HEADERS, HRPT_SOURCE_LABEL, FIELD_PERMIT_CACHE_TABLE, FIELD_SYNC_META_TABLE } from "./config.js";
 import { parseHrptPermitsHtml } from "./parser.js";
-import { resolveFieldId } from "./fieldMap.js";
+import { resolveFieldId, NO_PERMIT_SCHEDULE_FIELDS } from "./fieldMap.js";
 import { replaceFieldPermitWindow, upsertSyncMeta } from "./d1Client.js";
 
 /**
@@ -41,6 +41,7 @@ async function runHrptSync(env, opts = {}) {
     fieldsWritten: 0,
     fieldsUnmapped: [],
     fieldsSkippedNoWindow: [],
+    fieldsNoPermitSchedule: [],
     rowsInserted: 0,
     anomalies: [],
     reason: null,
@@ -143,6 +144,30 @@ async function runHrptSync(env, opts = {}) {
       log.error(`[hrpt-sync] ${msg}`);
       // Do not throw: keep processing remaining fields so one field's DB
       // error doesn't abort the whole run.
+    }
+  }
+
+  // Fields confirmed to never have a schedule table on the live page at all
+  // (see fieldMap.js NO_PERMIT_SCHEDULE_FIELDS) never appear in `fieldsFound`
+  // above, so the normal loop can't reach them — write their sync_meta here,
+  // every run, so the frontend can distinguish "confirmed no permit needed"
+  // from "not yet synced" instead of leaving them stuck on "loading".
+  for (const { fieldId, name } of NO_PERMIT_SCHEDULE_FIELDS) {
+    try {
+      await upsertSyncMeta(env, {
+        table: FIELD_SYNC_META_TABLE,
+        row: {
+          field_id: fieldId,
+          last_permit_sync_at: summary.fetchedAt,
+          live_availability_status: "no_permit_schedule",
+          permit_source_url: HRPT_PERMITS_URL,
+        },
+      });
+      summary.fieldsNoPermitSchedule.push(name);
+    } catch (err) {
+      const msg = `no-permit-schedule meta write failed for "${name}" (${fieldId}): ${err && err.message ? err.message : err}`;
+      summary.anomalies.push(msg);
+      log.error(`[hrpt-sync] ${msg}`);
     }
   }
 

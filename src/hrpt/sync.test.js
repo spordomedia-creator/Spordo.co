@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { runHrptSync } from "./sync.js";
-import { EXACT_NAME_TO_FIELD_ID } from "./fieldMap.js";
+import { EXACT_NAME_TO_FIELD_ID, NO_PERMIT_SCHEDULE_FIELDS } from "./fieldMap.js";
 import { createFakeD1 } from "./__testUtils__/fakeD1.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -52,10 +52,27 @@ test("happy path: fetches, parses, and writes cache + sync_meta for mapped field
   const pier25CacheRows = tables.field_permit_cache.filter((r) => r.field_id === pier25Id);
   assert.equal(pier25CacheRows.length, 2);
 
-  assert.equal(tables.field_sync_meta.length, 2);
+  assert.equal(tables.field_sync_meta.length, 2 + NO_PERMIT_SCHEDULE_FIELDS.length);
   const pier25Meta = tables.field_sync_meta.find((r) => r.field_id === pier25Id);
   assert.equal(pier25Meta.live_availability_status, "synced");
   assert.equal(pier25Meta.permit_source_url, "https://hudsonriverpark.org/visit/events/permits/fields/");
+});
+
+test("writes a no_permit_schedule sync_meta row every run for fields confirmed to have no HRPT table at all", async () => {
+  const { fetchImpl } = makePageFetch();
+  const { db, tables } = createFakeD1();
+
+  const summary = await runHrptSync({ DB: db }, { fetchImpl, now: () => REFERENCE_DATE, log: silentLog() });
+
+  assert.deepEqual(
+    summary.fieldsNoPermitSchedule,
+    NO_PERMIT_SCHEDULE_FIELDS.map((f) => f.name)
+  );
+  for (const { fieldId } of NO_PERMIT_SCHEDULE_FIELDS) {
+    const meta = tables.field_sync_meta.find((r) => r.field_id === fieldId);
+    assert.ok(meta, `expected a field_sync_meta row for ${fieldId}`);
+    assert.equal(meta.live_availability_status, "no_permit_schedule");
+  }
 });
 
 test("a suspiciously short response body aborts before any D1 write", async () => {

@@ -5059,6 +5059,11 @@ function renderSchdBody() {
       return;
     }
 
+    if (f._noPermitSchedule) {
+      el.innerHTML = `<div class="schd-week-none" style="padding:40px 0">Open play — no permit required (first-come, first-served)</div>` + footer;
+      return;
+    }
+
     if (S.panelView === 'month') {
       renderSchdMonth(f, '', footer);
     } else {
@@ -5903,8 +5908,15 @@ function _hrptRowToPermit(r) {
 // already-loaded f.permits — so switching WEEK/MONTH or navigating back to
 // this field later doesn't re-fetch.
 async function loadExternalPermits(f) {
-  const { permits } = await fetchPermitsPayload(f.id);
+  const { meta, permits } = await fetchPermitsPayload(f.id);
   f.permits = (permits || []).map(_hrptRowToPermit);
+  // "no_permit_schedule" = confirmed (not guessed) via source research that
+  // this field has no bookable schedule at all — e.g. Chelsea Waterside
+  // Basketball Court is drop-in/first-come-first-served, so HRPT publishes
+  // no table for it (see src/hrpt/fieldMap.js NO_PERMIT_SCHEDULE_FIELDS).
+  // Distinct from an empty `permits` array, which just means "no bookings
+  // in the cached window" for a field that IS on a real schedule.
+  f._noPermitSchedule = meta?.live_availability_status === 'no_permit_schedule';
   f._permitsLoaded = true;
 }
 
