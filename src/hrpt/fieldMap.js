@@ -39,7 +39,6 @@
  * matching this branch's FIELD_DATABASE `name`) -> internal field_id.
  */
 const EXACT_NAME_TO_FIELD_ID = {
-  "Chelsea Waterside Basketball Court": "SFJQfENoZWxzZWEgV2F0ZXJzaWRlIEJhc2tldGJhbGwgQ291cnQ_",
   "Chelsea Waterside Athletic Field": "SFJQfENoZWxzZWEgV2F0ZXJzaWRlIEF0aGxldGljIEZpZWxk",
   "Pier 26 Sports Court": "SFJQfFBpZXIgMjYgU3BvcnRzIENvdXJ0",
   "Pier 25 Artificial Turf Field": "SFJQfFBpZXIgMjUgQXJ0aWZpY2lhbCBUdXJmIEZpZWxk",
@@ -99,6 +98,28 @@ const ALIASES = [
   },
 ];
 
+/**
+ * Fields confirmed (Perplexity full-browser-render research, 2026-07-11) to
+ * have NO schedule table anywhere on the live HRPT permits page — not a
+ * naming mismatch to alias, an actual absence. HRP publishes 9 tables total
+ * (Pier 25 Turf Field, Pier 26 Sports Court, Pier 40 Courtyard East/West,
+ * Pier 40 Indoor Youth Field, Pier 40 Rooftop Field #1/#2, Gansevoort
+ * Peninsula Athletic Field, Chelsea Waterside Athletic Field) and none of
+ * them cover basketball courts. These fields are presumed first-come/
+ * first-served drop-in play with no bookable permit, per that research —
+ * do NOT add them to EXACT_NAME_TO_FIELD_ID or ALIASES; resolveFieldId()
+ * correctly returning null for their names is expected, not a bug. sync.js
+ * writes an explicit `live_availability_status: "no_permit_schedule"`
+ * field_sync_meta row for each of these every run so the frontend can show
+ * "open play" instead of leaving the field stuck on "loading" forever.
+ */
+const NO_PERMIT_SCHEDULE_FIELDS = [
+  {
+    fieldId: "SFJQfENoZWxzZWEgV2F0ZXJzaWRlIEJhc2tldGJhbGwgQ291cnQ_",
+    name: "Chelsea Waterside Basketball Court",
+  },
+];
+
 const ALIAS_NAME_TO_FIELD_ID = Object.fromEntries(ALIASES.map((a) => [a.pageName, a.fieldId]));
 
 function normalize(name) {
@@ -132,4 +153,4 @@ function resolveFieldId(fieldNameOnPage) {
   return null;
 }
 
-export { EXACT_NAME_TO_FIELD_ID, ALIASES, resolveFieldId };
+export { EXACT_NAME_TO_FIELD_ID, ALIASES, NO_PERMIT_SCHEDULE_FIELDS, resolveFieldId };

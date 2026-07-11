@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveFieldId, EXACT_NAME_TO_FIELD_ID } from "./fieldMap.js";
+import { resolveFieldId, EXACT_NAME_TO_FIELD_ID, NO_PERMIT_SCHEDULE_FIELDS } from "./fieldMap.js";
 
 test("resolves an exact-match current FIELD_DATABASE name", () => {
   const result = resolveFieldId("Pier 25 Artificial Turf Field");
@@ -45,4 +45,10 @@ test("returns null (does not guess) for an unrecognized name", () => {
 test("returns null for empty/nullish input", () => {
   assert.equal(resolveFieldId(""), null);
   assert.equal(resolveFieldId(null), null);
+});
+
+test("returns null for a field confirmed to have no HRPT schedule table (Chelsea Waterside Basketball Court)", () => {
+  assert.equal(resolveFieldId("Chelsea Waterside Basketball Court"), null);
+  assert.equal(resolveFieldId("Chelsea Waterside Basketball Court Schedule"), null);
+  assert.ok(NO_PERMIT_SCHEDULE_FIELDS.some((f) => f.name === "Chelsea Waterside Basketball Court"));
 });
