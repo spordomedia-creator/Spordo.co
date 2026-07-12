@@ -2803,6 +2803,16 @@ footer { padding-bottom: calc(36px + var(--sab)); }
     </div>
   </div>
 
+  <!-- Borough filter -->
+  <div class="borough-strip" role="group" aria-label="Filter fields by borough">
+    <button type="button" class="bchip active" data-b="ALL" aria-pressed="true" onclick="selectBorough('ALL', this)">All Boroughs</button>
+    <button type="button" class="bchip" data-b="MANHATTAN" aria-pressed="false" onclick="selectBorough('MANHATTAN', this)" style="--bc-color:#8B5CF6"><span class="bchip-dot"></span>Manhattan</button>
+    <button type="button" class="bchip" data-b="BROOKLYN" aria-pressed="false" onclick="selectBorough('BROOKLYN', this)" style="--bc-color:#3B82F6"><span class="bchip-dot"></span>Brooklyn</button>
+    <button type="button" class="bchip" data-b="QUEENS" aria-pressed="false" onclick="selectBorough('QUEENS', this)" style="--bc-color:#F59E0B"><span class="bchip-dot"></span>Queens</button>
+    <button type="button" class="bchip" data-b="BRONX" aria-pressed="false" onclick="selectBorough('BRONX', this)" style="--bc-color:#F97316"><span class="bchip-dot"></span>The Bronx</button>
+    <button type="button" class="bchip" data-b="STATEN ISLAND" aria-pressed="false" onclick="selectBorough('STATEN ISLAND', this)" style="--bc-color:#14B8A6"><span class="bchip-dot"></span>Staten Island</button>
+  </div>
+
   <!-- Interactive Map -->
   <div class="fv-map-wrap">
     <div class="fv-map-container">
@@ -4000,11 +4010,10 @@ const FIELD_DIRECTORY = [
 
 /* ── EXTERNAL (NON-PARKS) FIELDS ─────────────── */
 const EXTERNAL_ORGS = [
-  // Hudson River Park Trust
-  { name:'Pier 40 — Field A',           sport:'soccer',     borough:'MANHATTAN', org:'Hudson River Park Trust',       orgShort:'HRPT',  bookingUrl:'https://www.hudsonriverpark.org/explore-the-park/activities/pier-40-athletic-facilities/' },
-  { name:'Pier 40 — Field B',           sport:'soccer',     borough:'MANHATTAN', org:'Hudson River Park Trust',       orgShort:'HRPT',  bookingUrl:'https://www.hudsonriverpark.org/explore-the-park/activities/pier-40-athletic-facilities/' },
-  { name:'Pier 40 — Field C',           sport:'soccer',     borough:'MANHATTAN', org:'Hudson River Park Trust',       orgShort:'HRPT',  bookingUrl:'https://www.hudsonriverpark.org/explore-the-park/activities/pier-40-athletic-facilities/' },
-  { name:'Gansevoort Peninsula Field',  sport:'soccer',     borough:'MANHATTAN', org:'Hudson River Park Trust',       orgShort:'HRPT',  bookingUrl:'https://www.hudsonriverpark.org/' },
+  // Hudson River Park Trust fields now live in FIELD_DATABASE with real
+  // synced permit data (src/hrpt/) — the old placeholder entries here
+  // (Pier 40 — Field A/B/C, Gansevoort Peninsula Field) were superseded by
+  // that migration and are deleted rather than left as stale duplicates.
   // Brooklyn Bridge Park
   { name:'Pier 5 Soccer Field',         sport:'soccer',     borough:'BROOKLYN',  org:'Brooklyn Bridge Park',          orgShort:'BBP',   bookingUrl:'https://www.brooklynbridgepark.org/fields' },
   // Randalls Island Park Alliance
@@ -4262,7 +4271,10 @@ function selectBorough(b, btn) {
     c.setAttribute('aria-pressed', c.dataset.b === b ? 'true' : 'false');
   });
   if (S.rawPermits.length) {
-    renderFields(groupByField(S.rawPermits, b));
+    // Same merge pipeline loadFields() uses — re-filtering with just
+    // groupByField() would drop every external-org and FIELD_DATABASE
+    // field the initial load had merged in.
+    renderFields(mergeDatabaseFields(mergeExternalFields(groupByField(S.rawPermits, b))));
   } else {
     loadFields();
   }
@@ -4421,7 +4433,12 @@ function mergeExternalFields(parksFields) {
       bookingUrl: e.bookingUrl,
       org: e.org,
     }));
-  return [...parksFields, ...newExternals].slice(0, 48);
+  // No cap here: mergeDatabaseFields() runs right after this and appends its
+  // own fields uncapped, so a slice here only ever throws away external-org
+  // fields specifically (silently, for any sport whose parks-field count
+  // already reaches 48 before externals are appended — soccer and
+  // basketball both do) while achieving no real limit on the final list.
+  return [...parksFields, ...newExternals];
 }
 
 /* ── 311 MAINTENANCE FLAGS ───────────────────────────────────────────────
