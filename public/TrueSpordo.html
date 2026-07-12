@@ -4109,16 +4109,23 @@ const EXTERNAL_ORGS = [
   { name:'Prospect Park Diamond 2',     sport:'baseball',   borough:'BROOKLYN',  org:'Prospect Park Alliance',        orgShort:'PPA',   bookingUrl:'https://www.prospectpark.org/visit-the-park/fields-courts/' },
   { name:'Prospect Park Tennis Center', sport:'tennis',     borough:'BROOKLYN',  org:'Prospect Park Alliance',        orgShort:'PPA',   bookingUrl:'https://www.prospectpark.org/visit-the-park/fields-courts/' },
   { name:'Prospect Park Lacrosse',      sport:'lacrosse',   borough:'BROOKLYN',  org:'Prospect Park Alliance',        orgShort:'PPA',   bookingUrl:'https://www.prospectpark.org/visit-the-park/fields-courts/' },
-  // NYCHA Community Fields
-  { name:'Queensbridge Houses Courts',  sport:'basketball', borough:'QUEENS',    org:'NYCHA',                         orgShort:'NYCHA', bookingUrl:'https://www.nycha.nyc.gov/' },
-  { name:'Red Hook Houses Courts',      sport:'basketball', borough:'BROOKLYN',  org:'NYCHA',                         orgShort:'NYCHA', bookingUrl:'https://www.nycha.nyc.gov/' },
-  { name:'East River Houses Courts',    sport:'basketball', borough:'MANHATTAN', org:'NYCHA',                         orgShort:'NYCHA', bookingUrl:'https://www.nycha.nyc.gov/' },
-  { name:'Ravenswood Houses Courts',    sport:'basketball', borough:'QUEENS',    org:'NYCHA',                         orgShort:'NYCHA', bookingUrl:'https://www.nycha.nyc.gov/' },
-  { name:'Patterson Houses Courts',     sport:'basketball', borough:'BRONX',     org:'NYCHA',                         orgShort:'NYCHA', bookingUrl:'https://www.nycha.nyc.gov/' },
-  // NYC Dept. of Education (school yard to playground program)
-  { name:'PS 10 Schoolyard Courts',     sport:'basketball', borough:'BROOKLYN',  org:'NYC Dept. of Education',        orgShort:'DOE',   bookingUrl:'https://www.nycgovparks.org/programs/school-yard-to-playground' },
-  { name:'PS 183 Schoolyard Courts',    sport:'basketball', borough:'MANHATTAN', org:'NYC Dept. of Education',        orgShort:'DOE',   bookingUrl:'https://www.nycgovparks.org/programs/school-yard-to-playground' },
-  { name:'IS 318 Schoolyard Courts',    sport:'basketball', borough:'BROOKLYN',  org:'NYC Dept. of Education',        orgShort:'DOE',   bookingUrl:'https://www.nycgovparks.org/programs/school-yard-to-playground' },
+  // NYCHA Community Fields — open-access courts, no permit/reservation for
+  // casual play; NYCHA jurisdiction (not NYC Parks) for scheduled/league use.
+  // Verified against NYCHA lease/house rules and the NYCHA permits page,
+  // which lists only filming permits, no court/space reservation product.
+  { name:'Queensbridge Houses Courts',  sport:'basketball', borough:'QUEENS',    org:'NYCHA',                  orgShort:'NYCHA', accessType:'open_access', bookingUrl:'https://www.nycha.nyc.gov/' },
+  { name:'Red Hook Houses Courts',      sport:'basketball', borough:'BROOKLYN',  org:'NYCHA',                  orgShort:'NYCHA', accessType:'open_access', bookingUrl:'https://www.nycha.nyc.gov/' },
+  { name:'East River Houses Courts',    sport:'basketball', borough:'MANHATTAN', org:'NYCHA',                  orgShort:'NYCHA', accessType:'open_access', bookingUrl:'https://www.nycha.nyc.gov/' },
+  { name:'Ravenswood Houses Courts',    sport:'basketball', borough:'QUEENS',    org:'NYCHA',                  orgShort:'NYCHA', accessType:'open_access', bookingUrl:'https://www.nycha.nyc.gov/' },
+  { name:'Patterson Houses Courts',     sport:'basketball', borough:'BRONX',     org:'NYCHA',                  orgShort:'NYCHA', accessType:'open_access', bookingUrl:'https://www.nycha.nyc.gov/' },
+  // NYC Dept. of Education (School Yard to Playground program) — DOE-operated
+  // (confirmed via NYC's CEQR Technical Manual + the program's own NYC Open
+  // Data dataset), open-access/unsupervised during non-school hours, no
+  // reservation for casual play. The old bookingUrl 404'd; replaced with
+  // NYC Parks' working reference page for the program.
+  { name:'PS 10 Schoolyard Courts',     sport:'basketball', borough:'BROOKLYN',  org:'NYC Dept. of Education', orgShort:'DOE',   accessType:'open_access', bookingUrl:'https://www.nycgovparks.org/greening/planyc/schoolyards' },
+  { name:'PS 183 Schoolyard Courts',    sport:'basketball', borough:'MANHATTAN', org:'NYC Dept. of Education', orgShort:'DOE',   accessType:'open_access', bookingUrl:'https://www.nycgovparks.org/greening/planyc/schoolyards' },
+  { name:'IS 318 Schoolyard Courts',    sport:'basketball', borough:'BROOKLYN',  org:'NYC Dept. of Education', orgShort:'DOE',   accessType:'open_access', bookingUrl:'https://www.nycgovparks.org/greening/planyc/schoolyards' },
   // The Trust for Governors Island — own booking site, no NYC Parks involvement
   { name:'Governors Island — Play Lawn A',    sport:'baseball', borough:'MANHATTAN', org:'The Trust for Governors Island', orgShort:'TGI', bookingUrl:'https://govisland.com/permits/athletic-fields' },
   { name:'Governors Island — Play Lawn B',    sport:'baseball', borough:'MANHATTAN', org:'The Trust for Governors Island', orgShort:'TGI', bookingUrl:'https://govisland.com/permits/athletic-fields' },
@@ -4517,6 +4524,8 @@ function mergeExternalFields(parksFields) {
       orgShort: e.orgShort,
       bookingUrl: e.bookingUrl,
       org: e.org,
+      operator: e.org,
+      accessType: e.accessType || null,
     }));
   return [...parksFields, ...newExternals].slice(0, 48);
 }
@@ -4807,7 +4816,9 @@ function addMapMarkers(fields) {
 
     // Build popup — use Esri satellite for fields with exact coords, Wikipedia fallback
     const orgLabel   = f.external ? esc(f.orgShort || f.addr || 'External') : 'NYC Parks';
-    const availLabel = f.external ? `BOOK AT ${orgLabel}` : 'CHECK AVAILABILITY';
+    const availLabel = f.accessType === 'open_access'
+      ? 'OPEN ACCESS'
+      : (f.external ? `BOOK AT ${orgLabel}` : 'CHECK AVAILABILITY');
     const satUrl     = getFieldSatelliteUrl(coords[0], coords[1], 480, 200);
 
     const popupHtml = `
@@ -4911,9 +4922,9 @@ function renderFields(fields) {
     const orgTag   = f.external
       ? `<span class="fa-org-tag">${esc(f.orgShort || 'External')}</span>`
       : '';
-    const availLabel = f.external
-      ? `BOOK AT ${esc(f.orgShort || 'EXT')}`
-      : 'CHECK AVAILABILITY';
+    const availLabel = f.accessType === 'open_access'
+      ? 'OPEN ACCESS'
+      : (f.external ? `BOOK AT ${esc(f.orgShort || 'EXT')}` : 'CHECK AVAILABILITY');
     return `
     <div class="fa-row" onclick="openSchedulePage('${esc(f.id)}')"
          onkeydown="if(event.key==='Enter')openSchedulePage('${esc(f.id)}')" tabindex="0"
@@ -5133,12 +5144,17 @@ function renderSchdBody() {
     // through the exact same renderSchdWeek/renderSchdMonth grid every
     // other field uses, once real data has been fetched once per field
     // (see loadExternalPermits), and is the first thing visible.
-    const footer = `
-      <div class="schd-ext-footer">
-        <span class="source-badge">${esc(f.orgShort)}</span>
-        <div class="ext-note">Managed by <strong>${esc(f.operator)}</strong> — independent permit system outside NYC Parks.</div>
-        <a class="ext-book-btn" href="${esc(f.bookingUrl)}" target="_blank" rel="noopener">Book at ${esc(f.orgShort)} →</a>
-      </div>`;
+    const footer = f.accessType === 'open_access'
+      ? `<div class="schd-ext-footer">
+          <span class="source-badge">${esc(f.orgShort)}</span>
+          <div class="ext-note">Open access — no permit needed for casual play. Managed by <strong>${esc(f.operator)}</strong>.</div>
+          ${f.bookingUrl ? `<a class="ext-book-btn" href="${esc(f.bookingUrl)}" target="_blank" rel="noopener">${esc(f.orgShort)} info →</a>` : ''}
+        </div>`
+      : `<div class="schd-ext-footer">
+          <span class="source-badge">${esc(f.orgShort)}</span>
+          <div class="ext-note">Managed by <strong>${esc(f.operator)}</strong> — independent permit system outside NYC Parks.</div>
+          <a class="ext-book-btn" href="${esc(f.bookingUrl)}" target="_blank" rel="noopener">Book at ${esc(f.orgShort)} →</a>
+        </div>`;
 
     if (!f._permitsLoaded) {
       el.innerHTML = `<div class="schd-week-none" style="padding:40px 0">Loading schedule…</div>` + footer;
