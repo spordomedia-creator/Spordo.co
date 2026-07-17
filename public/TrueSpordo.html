@@ -3651,6 +3651,13 @@ const FIELD_COORDS = {
   'Randalls Island Lacrosse':          [40.78650, -73.92950],
   'Randalls Island Rugby Pitch':       [40.78700, -73.93000],
   'Randalls Island Baseball 1':        [40.78950, -73.92650],
+  // Real Socrata field names are "Randall's Island Park: <Sub-Area>
+  // Fields-Soccer-##" (Wards Meadow/East River/Hell Gate/Sunken
+  // Garden/Central/Bronx Shore) -- none of which match the entries
+  // above (different apostrophe/wording), so live data was falling
+  // through to random jitter. One park-level entry lets the tier-2
+  // substring match in getFieldCoords() catch all of them.
+  'Randall\'s Island Park':            [40.79080, -73.92350],
   'Inwood Hill Soccer Field':          [40.86721, -73.92604],
   'Inwood Hill Rugby':                 [40.86680, -73.92582],
   'East River Houses Courts':          [40.79402, -73.93781],
@@ -4095,20 +4102,19 @@ const EXTERNAL_ORGS = [
   { name:'Gansevoort Peninsula Field',  sport:'soccer',     borough:'MANHATTAN', org:'Hudson River Park Trust',       orgShort:'HRPT',  bookingUrl:'https://www.hudsonriverpark.org/' },
   // Brooklyn Bridge Park
   { name:'Pier 5 Soccer Field',         sport:'soccer',     borough:'BROOKLYN',  org:'Brooklyn Bridge Park',          orgShort:'BBP',   bookingUrl:'https://www.brooklynbridgepark.org/fields' },
-  // Randalls Island Park Alliance
-  { name:'Randalls Island — Field 60',  sport:'soccer',     borough:'MANHATTAN', org:'Randalls Island Park Alliance', orgShort:'RIPA',  bookingUrl:'https://www.randallsisland.org/permits' },
-  { name:'Randalls Island — Field 61',  sport:'soccer',     borough:'MANHATTAN', org:'Randalls Island Park Alliance', orgShort:'RIPA',  bookingUrl:'https://www.randallsisland.org/permits' },
-  { name:'Randalls Island — Field 62',  sport:'soccer',     borough:'MANHATTAN', org:'Randalls Island Park Alliance', orgShort:'RIPA',  bookingUrl:'https://www.randallsisland.org/permits' },
-  { name:'Randalls Island — Field 42',  sport:'football',   borough:'MANHATTAN', org:'Randalls Island Park Alliance', orgShort:'RIPA',  bookingUrl:'https://www.randallsisland.org/permits' },
-  { name:'Randalls Island Lacrosse',    sport:'lacrosse',   borough:'MANHATTAN', org:'Randalls Island Park Alliance', orgShort:'RIPA',  bookingUrl:'https://www.randallsisland.org/permits' },
-  { name:'Randalls Island Rugby Pitch', sport:'rugby',      borough:'MANHATTAN', org:'Randalls Island Park Alliance', orgShort:'RIPA',  bookingUrl:'https://www.randallsisland.org/permits' },
-  { name:'Randalls Island Baseball 1',  sport:'baseball',   borough:'MANHATTAN', org:'Randalls Island Park Alliance', orgShort:'RIPA',  bookingUrl:'https://www.randallsisland.org/permits' },
-  // Prospect Park Alliance
-  { name:'Prospect Park — Long Meadow', sport:'soccer',     borough:'BROOKLYN',  org:'Prospect Park Alliance',        orgShort:'PPA',   bookingUrl:'https://www.prospectpark.org/visit-the-park/fields-courts/' },
-  { name:'Prospect Park Diamond 1',     sport:'baseball',   borough:'BROOKLYN',  org:'Prospect Park Alliance',        orgShort:'PPA',   bookingUrl:'https://www.prospectpark.org/visit-the-park/fields-courts/' },
-  { name:'Prospect Park Diamond 2',     sport:'baseball',   borough:'BROOKLYN',  org:'Prospect Park Alliance',        orgShort:'PPA',   bookingUrl:'https://www.prospectpark.org/visit-the-park/fields-courts/' },
-  { name:'Prospect Park Tennis Center', sport:'tennis',     borough:'BROOKLYN',  org:'Prospect Park Alliance',        orgShort:'PPA',   bookingUrl:'https://www.prospectpark.org/visit-the-park/fields-courts/' },
-  { name:'Prospect Park Lacrosse',      sport:'lacrosse',   borough:'BROOKLYN',  org:'Prospect Park Alliance',        orgShort:'PPA',   bookingUrl:'https://www.prospectpark.org/visit-the-park/fields-courts/' },
+  // Randall's Island and Prospect Park fields are NOT independently
+  // bookable -- verified via Perplexity research (2026-07): both
+  // conservancies route permits through NYC Parks itself ("Athletic field
+  // permits for Randall's Island Park are issued by NYC Parks" -- RIPA's
+  // own permits page; Prospect Park Alliance's permits page says the same).
+  // Previously listed here as "external" orgs with a "BOOK AT RIPA/PPA"
+  // CTA, which was wrong. Moved to FIELD_DATABASE instead of deleted --
+  // that keeps them visible as known NYC Parks fields (real coordinates,
+  // real neighborhood/address, correct nycgovparks.org permit link, no
+  // fake "external" framing) even when Socrata has no live permit for
+  // them right now, matching how every other FIELD_DATABASE fallback
+  // field already behaves; they don't belong in a list of non-Parks
+  // fields at all.
   // NYCHA Community Fields — open-access courts, no permit/reservation for
   // casual play; NYCHA jurisdiction (not NYC Parks) for scheduled/league use.
   // Verified against NYCHA lease/house rules and the NYCHA permits page,
