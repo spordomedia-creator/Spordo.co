@@ -4816,9 +4816,14 @@ function addMapMarkers(fields) {
 
     // Build popup — use Esri satellite for fields with exact coords, Wikipedia fallback
     const orgLabel   = f.external ? esc(f.orgShort || f.addr || 'External') : 'NYC Parks';
+    // HRPT fields render through the same real synced schedule grid as
+    // every other field (see loadExternalPermits) -- clicking this always
+    // opens the in-app schedule, never an external site, so "BOOK AT HRPT"
+    // is misleading. Other external orgs have no synced data (permits: []
+    // always), so "BOOK AT X" is still accurate for them.
     const availLabel = f.accessType === 'open_access'
       ? 'OPEN ACCESS'
-      : (f.external ? `BOOK AT ${orgLabel}` : 'CHECK AVAILABILITY');
+      : (f.external && f.orgShort !== 'HRPT' ? `BOOK AT ${orgLabel}` : 'CHECK AVAILABILITY');
     const satUrl     = getFieldSatelliteUrl(coords[0], coords[1], 480, 200);
 
     const popupHtml = `
@@ -4924,7 +4929,7 @@ function renderFields(fields) {
       : '';
     const availLabel = f.accessType === 'open_access'
       ? 'OPEN ACCESS'
-      : (f.external ? `BOOK AT ${esc(f.orgShort || 'EXT')}` : 'CHECK AVAILABILITY');
+      : (f.external && f.orgShort !== 'HRPT' ? `BOOK AT ${esc(f.orgShort || 'EXT')}` : 'CHECK AVAILABILITY');
     return `
     <div class="fa-row" onclick="openSchedulePage('${esc(f.id)}')"
          onkeydown="if(event.key==='Enter')openSchedulePage('${esc(f.id)}')" tabindex="0"
@@ -5155,6 +5160,15 @@ function renderSchdBody() {
           <div class="ext-note">Managed by <strong>${esc(f.operator)}</strong> — independent permit system outside NYC Parks.</div>
           <a class="ext-book-btn" href="${esc(f.bookingUrl)}" target="_blank" rel="noopener">Book at ${esc(f.orgShort)} →</a>
         </div>`;
+
+    // Open-access fields (e.g. NYCHA/DOE courts) have no permit data to
+    // fetch at all -- there's no sync job or D1 row for them, so skip the
+    // loading fetch entirely instead of flashing "Loading schedule..." for
+    // a request that will always come back empty.
+    if (f.accessType === 'open_access') {
+      el.innerHTML = `<div class="schd-week-none" style="padding:40px 0">Open play — no permit required (first-come, first-served)</div>` + footer;
+      return;
+    }
 
     if (!f._permitsLoaded) {
       el.innerHTML = `<div class="schd-week-none" style="padding:40px 0">Loading schedule…</div>` + footer;
