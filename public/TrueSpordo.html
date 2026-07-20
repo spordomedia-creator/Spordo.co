@@ -4663,7 +4663,13 @@ function groupByField(permits, borough) {
     }
     map[key].permits.push(p);
   }
-  return Object.values(map).sort((a,b) => b.permits.length - a.permits.length).slice(0,80);
+  // Cap raised from 80 -> 300: real citywide demand already exceeds 180
+  // distinct fields on a normal day (confirmed live), and sorting by raw
+  // permit count means parks that split bookings across many separately-
+  // named fields (e.g. Randall's Island's 14+ fields) systematically lose
+  // to fields with fewer, more concentrated permits -- an 80-cap was
+  // silently dropping more than half of real active fields citywide.
+  return Object.values(map).sort((a,b) => b.permits.length - a.permits.length).slice(0,300);
 }
 
 function canonBorough(s) {
