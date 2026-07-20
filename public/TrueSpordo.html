@@ -3652,12 +3652,20 @@ const FIELD_COORDS = {
   'Randalls Island Rugby Pitch':       [40.78700, -73.93000],
   'Randalls Island Baseball 1':        [40.78950, -73.92650],
   // Real Socrata field names are "Randall's Island Park: <Sub-Area>
-  // Fields-Soccer-##" (Wards Meadow/East River/Hell Gate/Sunken
-  // Garden/Central/Bronx Shore) -- none of which match the entries
-  // above (different apostrophe/wording), so live data was falling
-  // through to random jitter. One park-level entry lets the tier-2
-  // substring match in getFieldCoords() catch all of them.
-  'Randall\'s Island Park':            [40.79080, -73.92350],
+  // Fields-Soccer-##" across 6 named sub-areas (field-number ranges
+  // per Randall's Island Park Alliance's own map + Manhattan Soccer
+  // Club's field-directions sheet). Coordinates are averaged from
+  // multiple confirmed per-field points (mapping-service embeds), not
+  // surveyed -- accurate to roughly 100-150m, well within a
+  // multi-field cluster's footprint. Central Fields/Bronx Shore have
+  // fewer confirmed source fields (50-51 and 8 respectively) so carry
+  // slightly more uncertainty than the other four.
+  'Randall\'s Island Park: Wards Meadow':  [40.7822, -73.9272],  // fields 70-75
+  'Randall\'s Island Park: East River':    [40.7844, -73.9346],  // fields 80-85
+  'Randall\'s Island Park: Hell Gate':     [40.7843, -73.9252],  // fields 60-63
+  'Randall\'s Island Park: Sunken Garden': [40.7859, -73.9311],  // fields 90-91
+  'Randall\'s Island Park: Central Fields':[40.7887, -73.9263],  // fields 50-54
+  'Randall\'s Island Park: Bronx Shore':   [40.8005, -73.9222],  // fields 1-9
   'Inwood Hill Soccer Field':          [40.86721, -73.92604],
   'Inwood Hill Rugby':                 [40.86680, -73.92582],
   'East River Houses Courts':          [40.79402, -73.93781],
@@ -4781,10 +4789,16 @@ function getFieldCoords(f) {
   if (dbEntry?.lat && dbEntry?.lng) return [dbEntry.lat, dbEntry.lng];
   // 2. Static FIELD_COORDS lookup
   if (FIELD_COORDS[f.name]) return FIELD_COORDS[f.name];
-  const key = Object.keys(FIELD_COORDS).find(k =>
-    k.toLowerCase().includes(f.name?.toLowerCase().split(':')[0].trim()) ||
-    f.name?.toLowerCase().includes(k.toLowerCase().split('—')[0].trim())
-  );
+  // Prefer the more specific match first: a key that's a substring of the
+  // FULL live name (distinguishes multiple sub-areas of one park, e.g.
+  // "Randall's Island Park: Wards Meadow..." vs "...: Central Fields...").
+  // Only fall back to the coarser "key contains the park-name-only prefix"
+  // match -- which can't discriminate between same-park entries at all --
+  // if no specific match exists.
+  const fNameLower = f.name?.toLowerCase() || '';
+  const parkPrefix = fNameLower.split(':')[0].trim();
+  let key = Object.keys(FIELD_COORDS).find(k => fNameLower.includes(k.toLowerCase().split('—')[0].trim()));
+  if (!key) key = Object.keys(FIELD_COORDS).find(k => k.toLowerCase().includes(parkPrefix));
   if (key) return FIELD_COORDS[key];
   // 3. Jittered borough center fallback
   const center = BOROUGH_CENTERS[f.borough] || [40.730, -73.935];
