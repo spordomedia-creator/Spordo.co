@@ -27,8 +27,19 @@ export default {
       return handlePermitsRequest(env, fieldId);
     }
 
-    // Everything else falls through to the static-asset runtime.
-    return env.ASSETS.fetch(request);
+    // Everything else falls through to the static-asset runtime first (real
+    // files like spordo-icon.png). If nothing matches and the path has no
+    // file extension, it's a client-side route (e.g. /soccer,
+    // /soccer/field/<id>) -- serve the app instead of 404ing, so a hard
+    // refresh or direct link works instead of breaking. Paths with a file
+    // extension (favicon.ico, etc.) still get a real 404 when missing.
+    const assetResponse = await env.ASSETS.fetch(request);
+    if (assetResponse.status === 404 && !url.pathname.includes(".")) {
+      const fallbackUrl = new URL(request.url);
+      fallbackUrl.pathname = "/TrueSpordo.html";
+      return env.ASSETS.fetch(new Request(fallbackUrl, request));
+    }
+    return assetResponse;
   },
 
   // Cron Trigger entrypoint (see wrangler.jsonc `triggers.crons`). Each

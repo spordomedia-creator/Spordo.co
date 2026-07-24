@@ -4227,7 +4227,70 @@ function go(view) {
   if (view === 'home')  renderSportGrid();
   if (view === 'waitlist') initWaitlistView();
   if (view === 'saved') renderSaved();
+  syncUrl();
 }
+
+/* ── URL ROUTING ──────────────────────────────
+   Client-side only: the Worker (src/index.js) falls back to serving
+   TrueSpordo.html for any extension-less path, so a hard refresh or
+   direct link on e.g. /soccer or /soccer/field/<id> re-runs this same
+   restoreFromUrl() logic instead of 404ing. */
+function boroughToSlug(b) { return (b || '').toLowerCase().replace(/\s+/g, '-'); }
+function slugToBorough(slug) {
+  return Object.keys(BOROUGHS).find(k => boroughToSlug(k) === slug) || null;
+}
+function computeUrl() {
+  if (S.view === 'schedule' && S.sport && S.activeField) {
+    return `/${S.sport.id}/field/${encodeURIComponent(S.activeField.id)}`;
+  }
+  if (S.view === 'fields' && S.sport) {
+    if (S.borough && S.borough !== 'ALL') return `/${S.sport.id}/${boroughToSlug(S.borough)}`;
+    return `/${S.sport.id}`;
+  }
+  return S.view === 'home' ? '/' : `/${S.view}`;
+}
+// Set while restoreFromUrl() is replaying navigation calls so syncUrl()
+// doesn't push new history entries for a URL that's already correct --
+// otherwise every popstate (back/forward) would push another entry on
+// top and corrupt the history stack.
+let _restoringFromUrl = false;
+function syncUrl() {
+  if (_restoringFromUrl) return;
+  const path = computeUrl();
+  if (window.location.pathname === path) return;
+  history.pushState({}, '', path);
+}
+// Shared by the initial page load and popstate (back/forward) -- parses
+// the URL and replays the same navigation calls a user clicking through
+// the UI would have made, so the resulting state is identical either way.
+async function restoreFromUrl() {
+  _restoringFromUrl = true;
+  try {
+    await _restoreFromUrlInner();
+  } finally {
+    _restoringFromUrl = false;
+  }
+}
+async function _restoreFromUrlInner() {
+  const parts = window.location.pathname.split('/').filter(Boolean);
+  if (!parts.length) { go('home'); return; }
+  const sport = SPORTS.find(s => s.id === parts[0]);
+  if (!sport) {
+    // Non-sport top-level views (waitlist, saved) or an unknown path.
+    if (['waitlist', 'saved'].includes(parts[0])) go(parts[0]);
+    else go('home');
+    return;
+  }
+  await pickSport(sport.id);
+  if (parts[1] === 'field' && parts[2]) {
+    const fieldId = decodeURIComponent(parts[2]);
+    if (S.fieldStore[fieldId]) openSchedulePage(fieldId);
+  } else if (parts[1]) {
+    const borough = slugToBorough(parts[1]);
+    if (borough) selectBorough(borough, document.querySelector(`.bchip[data-b="${borough}"]`));
+  }
+}
+window.addEventListener('popstate', () => { restoreFromUrl(); });
 
 /* ── LEGAL VIEW ─────────────────────────────── */
 function switchLegalView(tab) {
@@ -4421,7 +4484,7 @@ function pickSport(id) {
   go('fields');
   // Initialize or reset the map
   initSpordoMap();
-  loadFields();
+  return loadFields();
 }
 
 /* ── BOROUGH FILTER ─────────────────────────── */
@@ -4436,6 +4499,7 @@ function selectBorough(b, btn) {
   } else {
     loadFields();
   }
+  syncUrl();
 }
 
 /* ── API ────────────────────────────────────── */
@@ -5249,6 +5313,7 @@ function openSchedulePage(fieldId) {
 function closeSchedulePage() {
   const bg = document.getElementById('schd-fv-bg');
   if (bg) bg.classList.remove('visible');
+  S.activeField = null;
   go('fields');
 }
 
@@ -5988,7 +6053,7 @@ function runIntroAnimation(isGated) {
 /* ── Hero h1 IntersectionObserver disabled on first load (intro handles it) ── */
 document.addEventListener('DOMContentLoaded', () => {
   renderSportGrid();
-  go('home');
+  restoreFromUrl();
   runIntroAnimation(false);
   initSupabase();
 });
