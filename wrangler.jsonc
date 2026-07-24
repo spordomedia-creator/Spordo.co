@@ -12,7 +12,15 @@
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
-    "not_found_handling": "404-page"
+    "not_found_handling": "404-page",
+    // Default ("auto-trailing-slash") redirects any *.html request to a
+    // clean URL (e.g. /TrueSpordo.html -> 307 -> /TrueSpordo). That
+    // silently ate the path on every client-side route (src/index.js's
+    // SPA fallback rewrites to /TrueSpordo.html, which then got
+    // redirected away from e.g. /soccer to /TrueSpordo, wiping out the
+    // route before the client router ever saw it) -- "none" serves the
+    // file directly with no redirect.
+    "html_handling": "none"
   },
   // Scheduled sync jobs. Every 3 hours is a "good citizen" cadence for
   // hudsonriverpark.org (it's never cached upstream per its response
