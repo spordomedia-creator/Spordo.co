@@ -4246,11 +4246,27 @@ function filterHeroSearch(val) {
 function renderHeroResults(q) {
   const container = document.getElementById('hero-search-results');
   if (!q) { container.innerHTML = ''; return; }
-  const list = FIELD_DIRECTORY.filter(f =>
+  const dirMatches = FIELD_DIRECTORY.filter(f =>
     f.name.toLowerCase().includes(q) ||
     f.sport.toLowerCase().includes(q) ||
     f.borough.toLowerCase().includes(q)
-  ).slice(0, 20);
+  );
+  // FIELD_DIRECTORY is a static snapshot and misses real live-only field
+  // names (e.g. "Randall's Island Park: Wards Meadow..."). Also search
+  // whatever sport is currently loaded so real fields the user can already
+  // see are actually findable by search too.
+  const liveMatches = (S.sport && S.allRenderedFields.length)
+    ? S.allRenderedFields
+        .filter(f => f.name.toLowerCase().includes(q))
+        .map(f => ({ name: f.name, sport: S.sport.id, borough: f.borough }))
+    : [];
+  const seen = new Set();
+  const list = [...dirMatches, ...liveMatches].filter(f => {
+    const k = f.sport + '|' + f.name.toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  }).slice(0, 20);
 
   if (!list.length) {
     container.innerHTML = '<div class="sr-pill-wrap"><div class="sr-no-results">No fields found</div></div>';
@@ -4656,17 +4672,23 @@ function groupByField(permits, borough) {
   for (const p of permits) {
     // Real API fields
     const rawName = p.event_location || p.location || p.park_name || 'NYC Parks Field';
-    const name    = String(rawName).replace(/\s+/g,' ').trim();
     const rawBoro = p.event_borough || p.borough || '';
     const bkey    = canonBorough(rawBoro);
 
     if (borough !== 'ALL' && bkey !== borough) continue;
 
-    const key = name + '|' + (bkey||'NYC');
-    if (!map[key]) {
-      map[key] = { id: encodeId(key), name, borough: bkey, addr: rawBoro, permits: [], mock: false };
+    // A single permit can list multiple fields as one comma-joined
+    // event_location string (e.g. a group booking spanning several
+    // fields at once) -- split so each field gets its own clean entry
+    // instead of one garbled combined name like "Field A ,Field B ,...".
+    const names = String(rawName).split(',').map(s => s.replace(/\s+/g,' ').trim()).filter(Boolean);
+    for (const name of names) {
+      const key = name + '|' + (bkey||'NYC');
+      if (!map[key]) {
+        map[key] = { id: encodeId(key), name, borough: bkey, addr: rawBoro, permits: [], mock: false };
+      }
+      map[key].permits.push(p);
     }
-    map[key].permits.push(p);
   }
   // Cap raised from 80 -> 300: real citywide demand already exceeds 180
   // distinct fields on a normal day (confirmed live), and sorting by raw
