@@ -4850,6 +4850,30 @@ function getDbEntry(f) {
   return FIELD_DATABASE.find(e => e.name.toLowerCase().startsWith(base)) || null;
 }
 
+// Deterministic (not Math.random) small offset so the same field name
+// always lands in the same spot across reloads, unlike the tier-3 jitter
+// fallback which is intentionally random every render. Uses a proper
+// bit-mixing finalizer (not just the raw polynomial hash) because names
+// that only differ by their last 1-2 characters (e.g. "...-70" vs
+// "...-71") otherwise produce near-identical, near-linear offsets instead
+// of a real 2D scatter.
+function _mixHash32(x) {
+  x = Math.imul(x ^ (x >>> 16), 2246822507);
+  x = Math.imul(x ^ (x >>> 13), 3266489909);
+  x ^= x >>> 16;
+  return x >>> 0;
+}
+function applyStableSpread([lat, lng], name) {
+  const s = name || '';
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  const h1 = _mixHash32(h), h2 = _mixHash32(h ^ 0x9e3779b9);
+  const dx = ((h1 % 2000) - 1000) / 1000; // -1..1
+  const dy = ((h2 % 2000) - 1000) / 1000; // -1..1
+  const spread = 0.0015; // ~150m -- stays within one sub-area's footprint
+  return [lat + dx * spread, lng + dy * spread];
+}
+
 function getFieldCoords(f) {
   // 0. Already enriched with exact coords during merge
   if (f._lat && f._lng) return [f._lat, f._lng];
@@ -4868,7 +4892,18 @@ function getFieldCoords(f) {
   const parkPrefix = fNameLower.split(':')[0].trim();
   let key = Object.keys(FIELD_COORDS).find(k => fNameLower.includes(k.toLowerCase().split('—')[0].trim()));
   if (!key) key = Object.keys(FIELD_COORDS).find(k => k.toLowerCase().includes(parkPrefix));
-  if (key) return FIELD_COORDS[key];
+  if (key) {
+    const [lat, lng] = FIELD_COORDS[key];
+    // Multiple distinct fields can share one fuzzy-matched coordinate
+    // (e.g. individually-numbered fields 70-75 within the single "Wards
+    // Meadow" sub-area entry). Spread them with a small offset that's
+    // STABLE per field name (not random-per-render like the tier-3
+    // fallback) so each gets its own visible pin without needing a
+    // researched coordinate for every single numbered field, while
+    // staying small enough to remain within that sub-area's real
+    // footprint.
+    return applyStableSpread([lat, lng], f.name);
+  }
   // 3. Jittered borough center fallback
   const center = BOROUGH_CENTERS[f.borough] || [40.730, -73.935];
   return [
