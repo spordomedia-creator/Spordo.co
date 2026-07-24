@@ -4541,7 +4541,12 @@ function mergeExternalFields(parksFields) {
       operator: e.org,
       accessType: e.accessType || null,
     }));
-  return [...parksFields, ...newExternals].slice(0, 48);
+  // No cap here: mergeDatabaseFields() runs right after this and appends
+  // its own fields uncapped, so slicing here only ever throws away real
+  // parksFields entries (groupByField() already applies its own citywide
+  // cap upstream) -- this was cutting the list from ~180 back down to 48
+  // even after that cap was raised.
+  return [...parksFields, ...newExternals];
 }
 
 /* ── 311 MAINTENANCE FLAGS ───────────────────────────────────────────────
