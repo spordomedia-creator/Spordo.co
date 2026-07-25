@@ -4946,15 +4946,32 @@ function getFieldCoords(f) {
   if (dbEntry?.lat && dbEntry?.lng) return [dbEntry.lat, dbEntry.lng];
   // 2. Static FIELD_COORDS lookup
   if (FIELD_COORDS[f.name]) return FIELD_COORDS[f.name];
-  // Prefer the more specific match first: a key that's a substring of the
-  // FULL live name (distinguishes multiple sub-areas of one park, e.g.
-  // "Randall's Island Park: Wards Meadow..." vs "...: Central Fields...").
-  // Only fall back to the coarser "key contains the park-name-only prefix"
-  // match -- which can't discriminate between same-park entries at all --
-  // if no specific match exists.
+  // Three-tier match, most specific first. A plain "does this key appear
+  // anywhere in the live name" check is unsafe on its own: a generic
+  // facility name can legitimately belong to two DIFFERENT real parks
+  // (e.g. Brooklyn's standalone "Parade Ground" park vs Van Cortlandt
+  // Park's own internal "Parade Ground" sub-area in the Bronx --
+  // "Van Cortlandt Park: Parade Ground-Soccer-C" contains "Parade Ground"
+  // as a literal substring despite being a completely different place).
   const fNameLower = f.name?.toLowerCase() || '';
   const parkPrefix = fNameLower.split(':')[0].trim();
-  let key = Object.keys(FIELD_COORDS).find(k => fNameLower.includes(k.toLowerCase().split('—')[0].trim()));
+  // 2a. Park-scoped keys (contain ':', e.g. "Randall's Island Park: Wards
+  // Meadow") are already disambiguated by their own park prefix, so a
+  // full-name substring match is safe.
+  let key = Object.keys(FIELD_COORDS).find(k => k.includes(':') && fNameLower.includes(k.toLowerCase().split('—')[0].trim()));
+  // 2b. Standalone park-name keys (no ':') must equal the live name's own
+  // park prefix exactly -- not just appear somewhere inside it -- so a
+  // same-named sub-area of an unrelated park can't cross-match.
+  if (!key) {
+    key = Object.keys(FIELD_COORDS).find(k => !k.includes(':') && (
+      k.toLowerCase() === parkPrefix || k.toLowerCase().split('—')[0].trim() === parkPrefix
+    ));
+  }
+  // 2c. Coarse last-resort fallback: original permissive "key contains the
+  // park prefix" check, kept for entries like "Marine Park Soccer Field"
+  // matching live name "Marine Park: Soccer-06" (the key text differs
+  // from the live name beyond the shared park name, so 2a/2b can't catch
+  // it, but "Marine Park" alone is distinctive enough not to collide).
   if (!key) key = Object.keys(FIELD_COORDS).find(k => k.toLowerCase().includes(parkPrefix));
   if (key) {
     const [lat, lng] = FIELD_COORDS[key];
