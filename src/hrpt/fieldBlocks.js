@@ -11,7 +11,7 @@
  * so it can be diagnosed against the real page.
  */
 
-import { extractElements, getAttr, textContent } from "./htmlUtils.js";
+import { extractElements, getAttr, textContent, decodeEntities } from "./htmlUtils.js";
 
 const HEADING_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6", "caption"];
 
@@ -111,6 +111,17 @@ function findHeadingText(divInnerHtml, tableStartWithinDiv) {
   const captions = extractElements(tableHtml, "caption");
   if (captions.length > 0) {
     const text = textContent(captions[0].innerHTML);
+    if (text) return text;
+  }
+
+  // Fall back further to a banner heading IMAGE inside the table thead --
+  // confirmed live (2026-08-22): the page renders the field name only as
+  // an <img alt="..."> in the banner row, not as heading text or <caption>.
+  const theadMatch = /<thead\b[^>]*>([\s\S]*?)<\/thead>/i.exec(tableHtml);
+  const theadHtml = theadMatch ? theadMatch[1] : tableHtml;
+  const imgAltMatch = /<img\b[^>]*\balt\s*=\s*"([^"]*)"[^>]*>/i.exec(theadHtml);
+  if (imgAltMatch && imgAltMatch[1]) {
+    const text = decodeEntities(imgAltMatch[1]).trim();
     if (text) return text;
   }
 

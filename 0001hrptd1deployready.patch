@@ -1,0 +1,2428 @@
+From ff544b0f00cdc249957f4af7e2e8d3cb9f2097f2 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 8 Jul 2026 21:10:48 +0000
+Subject: [PATCH 1/2] Port HRPT permit-sync storage from Supabase to Cloudflare
+ D1
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Replaces the hand-written PostgREST client (src/hrpt/supabaseClient.js)
+with a D1 Workers-binding client (src/hrpt/d1Client.js), adds the D1
+schema migration, updates sync.js/wrangler.jsonc/.dev.vars.example
+accordingly, and ports the test suite to a fake D1 binding instead of
+mocked Supabase HTTP calls. Scoped to the HRPT pipeline only — auth and
+the DPR/NYC-Parks Supabase reads in public/TrueSpordo.html are untouched.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01K6wNm6Egrsk6EfrFh2YdtX
+---
+ .dev.vars.example                |   15 +-
+ migrations/0001_init.sql         |   42 +
+ package-lock.json                | 1505 ++++++++++++++++++++++++++++++
+ src/hrpt/__testUtils__/fakeD1.js |  110 +++
+ src/hrpt/d1Client.js             |  115 +++
+ src/hrpt/d1Client.test.js        |  154 +++
+ src/hrpt/supabaseClient.js       |  113 ---
+ src/hrpt/sync.js                 |    6 +-
+ src/hrpt/sync.test.js            |  103 +-
+ wrangler.jsonc                   |   40 +-
+ 10 files changed, 2016 insertions(+), 187 deletions(-)
+ create mode 100644 migrations/0001_init.sql
+ create mode 100644 package-lock.json
+ create mode 100644 src/hrpt/__testUtils__/fakeD1.js
+ create mode 100644 src/hrpt/d1Client.js
+ create mode 100644 src/hrpt/d1Client.test.js
+ delete mode 100644 src/hrpt/supabaseClient.js
+
+diff --git a/.dev.vars.example b/.dev.vars.example
+index 2dd0a92..e0eac42 100644
+--- a/.dev.vars.example
++++ b/.dev.vars.example
+@@ -1,7 +1,12 @@
+ # Copy to .dev.vars for local `wrangler dev` / `wrangler dev --test-scheduled`.
+ # Never commit the real values (.dev.vars is gitignored).
+-
+-# Service-role key for the same Supabase project configured in
+-# wrangler.jsonc's `vars.SUPABASE_URL`. Server-side only — never expose
+-# this in client code (the frontend uses the public anon key instead).
+-SUPABASE_SERVICE_ROLE_KEY=
++#
++# The HRPT sync's storage backend is Cloudflare D1 (see the `d1_databases`
++# binding in wrangler.jsonc), accessed via the `env.DB` Workers binding —
++# not a REST URL + bearer token, so there is no secret to set here for it.
++# `wrangler dev` automatically provisions a local D1 simulation for the
++# `DB` binding; run `wrangler d1 migrations apply spordo-hrpt --local` once
++# to apply migrations/0001_init.sql to it.
++#
++# (No vars currently required here. This file is kept as the place to add
++# any future local-dev secrets.)
+diff --git a/migrations/0001_init.sql b/migrations/0001_init.sql
+new file mode 100644
+index 0000000..46ccb36
+--- /dev/null
++++ b/migrations/0001_init.sql
+@@ -0,0 +1,42 @@
++-- Migration number: 0001    2026-07-08T00:00:00.000Z
++--
++-- Initial D1 schema for the permit-sync pipeline. Written for the HRPT
++-- sync (src/hrpt/) but shaped to also serve the not-yet-built NYC Open
++-- Data / Socrata (tvpp-9vvx) sync, per data-pipeline-engineer's mandate
++-- that both sources write the same field_permit_cache / field_sync_meta
++-- shape. This file is the canonical DDL for that shape — keep
++-- src/hrpt/d1Client.js in sync if columns ever change.
++--
++-- Apply with:
++--   wrangler d1 migrations apply spordo-hrpt --remote   (production)
++--   wrangler d1 migrations apply spordo-hrpt --local    (local/dev)
++-- See wrangler.jsonc for the full provisioning steps (this migration
++-- can't be applied until the D1 database itself has been created there).
++
++CREATE TABLE IF NOT EXISTS field_permit_cache (
++  id INTEGER PRIMARY KEY AUTOINCREMENT,
++  field_id TEXT NOT NULL,
++  permit_date TEXT NOT NULL,      -- ISO date, e.g. "2026-06-28"
++  start_time TEXT,                -- e.g. "18:00"; nullable for rows without a parsed time
++  end_time TEXT,
++  event_name TEXT,
++  created_at TEXT NOT NULL DEFAULT (datetime('now'))
++);
++
++-- The sync's delete-then-insert window strategy (see
++-- src/hrpt/d1Client.js replaceFieldPermitWindow) filters on exactly this
++-- pair on every run, so index it to keep syncs cheap as the table grows.
++CREATE INDEX IF NOT EXISTS idx_field_permit_cache_field_date
++  ON field_permit_cache (field_id, permit_date);
++
++CREATE TABLE IF NOT EXISTS field_sync_meta (
++  -- field_id as PRIMARY KEY gives us the UNIQUE constraint the upsert
++  -- (`ON CONFLICT(field_id) DO UPDATE`, see src/hrpt/d1Client.js
++  -- upsertSyncMeta) requires — this was a known open item carried over
++  -- from the Supabase plan (that table never got a UNIQUE constraint
++  -- migrated in-repo either) and is fixed here.
++  field_id TEXT PRIMARY KEY,
++  last_permit_sync_at TEXT NOT NULL,
++  live_availability_status TEXT,
++  permit_source_url TEXT
++);
+diff --git a/package-lock.json b/package-lock.json
+new file mode 100644
+index 0000000..15d2582
+--- /dev/null
++++ b/package-lock.json
+@@ -0,0 +1,1505 @@
++{
++  "name": "spordo",
++  "version": "1.0.0",
++  "lockfileVersion": 3,
++  "requires": true,
++  "packages": {
++    "": {
++      "name": "spordo",
++      "version": "1.0.0",
++      "devDependencies": {
++        "wrangler": "^4.20.0"
++      }
++    },
++    "node_modules/@cloudflare/kv-asset-handler": {
++      "version": "0.5.0",
++      "resolved": "https://registry.npmjs.org/@cloudflare/kv-asset-handler/-/kv-asset-handler-0.5.0.tgz",
++      "integrity": "sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg==",
++      "dev": true,
++      "license": "MIT OR Apache-2.0",
++      "engines": {
++        "node": ">=22.0.0"
++      }
++    },
++    "node_modules/@cloudflare/unenv-preset": {
++      "version": "2.16.1",
++      "resolved": "https://registry.npmjs.org/@cloudflare/unenv-preset/-/unenv-preset-2.16.1.tgz",
++      "integrity": "sha512-ECxObrMfyTl5bhQf/lZCXwo5G6xX9IAUo+nDMKK4SZ8m4Jvvxp52vilxyySSWh2YTZz8+HQ07qGH/2rEom1vDw==",
++      "dev": true,
++      "license": "MIT OR Apache-2.0",
++      "peerDependencies": {
++        "unenv": "2.0.0-rc.24",
++        "workerd": ">1.20260305.0 <2.0.0-0"
++      },
++      "peerDependenciesMeta": {
++        "workerd": {
++          "optional": true
++        }
++      }
++    },
++    "node_modules/@cloudflare/workerd-darwin-64": {
++      "version": "1.20260706.1",
++      "resolved": "https://registry.npmjs.org/@cloudflare/workerd-darwin-64/-/workerd-darwin-64-1.20260706.1.tgz",
++      "integrity": "sha512-61XleG5EaE+Zam2Y/fwOcMInMrjd3QMKIG0/+pHycZcVZC5Oxs5GfHSTnvyhcniigGW/bcIkvn1PptWbxlVleQ==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "engines": {
++        "node": ">=16"
++      }
++    },
++    "node_modules/@cloudflare/workerd-darwin-arm64": {
++      "version": "1.20260706.1",
++      "resolved": "https://registry.npmjs.org/@cloudflare/workerd-darwin-arm64/-/workerd-darwin-arm64-1.20260706.1.tgz",
++      "integrity": "sha512-jbwuMEuhgrXEk+9MD8eHPRsXWlxqtNMqqCMBLJauTHk+NR+U2O6hJXElPqlAVlUTh0A0GPM+DfATupRXm7Ml8w==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "engines": {
++        "node": ">=16"
++      }
++    },
++    "node_modules/@cloudflare/workerd-linux-64": {
++      "version": "1.20260706.1",
++      "resolved": "https://registry.npmjs.org/@cloudflare/workerd-linux-64/-/workerd-linux-64-1.20260706.1.tgz",
++      "integrity": "sha512-kppCFkt6WHTNmcE83aUj4chWV13hdQKOgXxn53sqpLiVnPi6HEIOWB1DNRAljG9IDt3KMgni9HdzCYVzq2drJA==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=16"
++      }
++    },
++    "node_modules/@cloudflare/workerd-linux-arm64": {
++      "version": "1.20260706.1",
++      "resolved": "https://registry.npmjs.org/@cloudflare/workerd-linux-arm64/-/workerd-linux-arm64-1.20260706.1.tgz",
++      "integrity": "sha512-H4xpocM1vXNfIVrP/JiOhLooWBXi5erE81hBj2wmCvPIUcf+49CuvZEthpVwFYn9SFop/Y8+bUiV0vVrWf8xuw==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=16"
++      }
++    },
++    "node_modules/@cloudflare/workerd-windows-64": {
++      "version": "1.20260706.1",
++      "resolved": "https://registry.npmjs.org/@cloudflare/workerd-windows-64/-/workerd-windows-64-1.20260706.1.tgz",
++      "integrity": "sha512-SPWuI+kBNtr/mhcKE7XOECgRWOaidmzVmvtmDrRZX5Y4/+XqD/heRAU5Oa17wOZm3eQ1CB8Xzxjrr/6uQaP8YA==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "engines": {
++        "node": ">=16"
++      }
++    },
++    "node_modules/@cspotcode/source-map-support": {
++      "version": "0.8.1",
++      "resolved": "https://registry.npmjs.org/@cspotcode/source-map-support/-/source-map-support-0.8.1.tgz",
++      "integrity": "sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "@jridgewell/trace-mapping": "0.3.9"
++      },
++      "engines": {
++        "node": ">=12"
++      }
++    },
++    "node_modules/@emnapi/runtime": {
++      "version": "1.11.2",
++      "resolved": "https://registry.npmjs.org/@emnapi/runtime/-/runtime-1.11.2.tgz",
++      "integrity": "sha512-kyOl3X0DuTiT1h2ft8r2fYO8JYtU9a9Xis/zBSiGArNaagCOWx90N1k2wxp18czFDH+OgcWGb5ZP/XMt3dcyPA==",
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "dependencies": {
++        "tslib": "^2.4.0"
++      }
++    },
++    "node_modules/@esbuild/aix-ppc64": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/aix-ppc64/-/aix-ppc64-0.28.1.tgz",
++      "integrity": "sha512-Svl7tq8k/08+p6CXPpRjQ1fKX+1odH/BQbb48fV6fj3CWHhsoIOoY87w1oHXm0qEpkIK3ZfVgp0hed3XBXzXMQ==",
++      "cpu": [
++        "ppc64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "aix"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/android-arm": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/android-arm/-/android-arm-0.28.1.tgz",
++      "integrity": "sha512-0k2F129Xdio1TdJfzJ8sy1Q47vUD2NnwdhiAf7drUN1EBTfPf4hsFCtmMgu/6m8JSzsBrlmVjudMBQqOfG8usQ==",
++      "cpu": [
++        "arm"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "android"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/android-arm64": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/android-arm64/-/android-arm64-0.28.1.tgz",
++      "integrity": "sha512-34EGEbCIAgosYz6goLcopX6Mo7NyGv9tfwEM2/7Ce2VcVRk568iSvniGWcUXIy7wEDR1wzolcxcriFVrWYcwBg==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "android"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/android-x64": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/android-x64/-/android-x64-0.28.1.tgz",
++      "integrity": "sha512-dbwY7ltSMDWsRatcRpCnES4F+im88OCUgGZjy52shC7GqHRE/cYlxNbB4Z4UpJswpcc4Qxd2oE/ufM0p61IKng==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "android"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/darwin-arm64": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/darwin-arm64/-/darwin-arm64-0.28.1.tgz",
++      "integrity": "sha512-TZbWkQY7kvTAXbXUT7uVACR5cMHsDiSz9z7ZKAX/RTq/WJEk3QyRr0wZpNhBDX+/0CtdqUIJlOiodQcta6tY3Q==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/darwin-x64": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/darwin-x64/-/darwin-x64-0.28.1.tgz",
++      "integrity": "sha512-zfdzgK9ACBNZLI/CyHTOx81SyNbM6YXn7rxSgX97VjyiPl9W1i4Ka4fgKECEoFCKGpvBj5qArWIGgQjOwkgskQ==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/freebsd-arm64": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/freebsd-arm64/-/freebsd-arm64-0.28.1.tgz",
++      "integrity": "sha512-wG2EA8ENdEI0qhkSZMjfqrdY+ziCYCPMmtZjjIwOmXFjmyzEHn+UUxk5of+SYsjtfs3VpnlC7QLzSI5hY/rOAw==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "freebsd"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/freebsd-x64": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/freebsd-x64/-/freebsd-x64-0.28.1.tgz",
++      "integrity": "sha512-i7dZ9vQgnvSCzi/rYCXNgtF/U+eKZNJBzu3eTQbRgHnM7tNSizLOkRFAl3qzVc/Op/u5YkHHa4pf/3DOYHthLQ==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "freebsd"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-arm": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-arm/-/linux-arm-0.28.1.tgz",
++      "integrity": "sha512-qVXBOHQS+d5Y722GwJzJUtOLlX7km3CraOaGormF1pDtPd2C/l1SHRPgjLunLGe51Sh5YYWKMFDyV4SxgMQYTQ==",
++      "cpu": [
++        "arm"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-arm64": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-arm64/-/linux-arm64-0.28.1.tgz",
++      "integrity": "sha512-yHs+0uc8+nvEAfAfxrWQKK5peSNzBc4PegcMO0EJ2hT71uA7vB8Ihg2e77R2P7SG5uYjPbHlLLmve4LLLRCf0g==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-ia32": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-ia32/-/linux-ia32-0.28.1.tgz",
++      "integrity": "sha512-d1z4ZuP0ajrfz/FhGT4vv278rX8KnPPJx8i5+AtK7TYbx9Le9F1hyzurZpkEyjkGa9dUGhQow4C1NmeGvqxN2w==",
++      "cpu": [
++        "ia32"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-loong64": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-loong64/-/linux-loong64-0.28.1.tgz",
++      "integrity": "sha512-M5sRjUVZrkm1OAPR3dlOYzNmN+loZKGVi1VUQGrwuqLcbR6qeAz+famMhjASeH3YVKvZz+zT1jlh/keC3Rj/lg==",
++      "cpu": [
++        "loong64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-mips64el": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-mips64el/-/linux-mips64el-0.28.1.tgz",
++      "integrity": "sha512-mRObBZeHh2OxcBFPWE/FjylkRgZdYuiTR3vaTozquCGOH14iP9oN4x4Ge81CoIDYQrXmIxpFumJBu5MtZpnQJQ==",
++      "cpu": [
++        "mips64el"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-ppc64": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-ppc64/-/linux-ppc64-0.28.1.tgz",
++      "integrity": "sha512-slScBsMAb3GFDcdrCgLwZtPYRoH2H/youv10QiZyRjmsP48fznoveWytSgCI/R0ZcUgpc0ZhIUEx6LHts8yrfQ==",
++      "cpu": [
++        "ppc64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-riscv64": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-riscv64/-/linux-riscv64-0.28.1.tgz",
++      "integrity": "sha512-kw0owk1o0GFETUJyW0jc0G4Yzs0BHZn0JDZ8JRT088vjJYX777BAs1fDGxAC+q831qOs2DTC96mNsG2opdfyyQ==",
++      "cpu": [
++        "riscv64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-s390x": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-s390x/-/linux-s390x-0.28.1.tgz",
++      "integrity": "sha512-/lAIjX8aYFRByhh6L5rYtPEDRqa9de/4V/juOXcta5frjvzXO4/sqEtyytse0g3zZFuWu5cDN0MkLz2qRDD2Ag==",
++      "cpu": [
++        "s390x"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-x64": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-0.28.1.tgz",
++      "integrity": "sha512-u/anNYF2mmVOEDwLtnQ1wOr3EZ9sTNGLWrsYGYwHWzGA3Si84IOkHXlbWTD1NB+9/1lcnweYKO54uhxZydNzfA==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/netbsd-arm64": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/netbsd-arm64/-/netbsd-arm64-0.28.1.tgz",
++      "integrity": "sha512-oks0DYbLwWMmaakTsCb+zL4E+aHRVLom9IJZOAthMQEPiQmydXHkziYEsGYRx0uNV/IjEKGAV941JzH02pflqw==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "netbsd"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/netbsd-x64": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/netbsd-x64/-/netbsd-x64-0.28.1.tgz",
++      "integrity": "sha512-aeL6lAnN89Hz43Mlh1G8ARasbuoYvSITDEx0tHh5b7jJnHcssqgjy9Yx430GDpmCa6OyrKoS0aNRjKundRizGg==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "netbsd"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/openbsd-arm64": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/openbsd-arm64/-/openbsd-arm64-0.28.1.tgz",
++      "integrity": "sha512-MEFJe5C3R8pwXdZ5Y21oo6m7ePiS0d9pWucn99O/wvyJZChoIQKrQDxKrGeW8F5+T0okTHesAmDeiHDTIq0V/Q==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "openbsd"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/openbsd-x64": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/openbsd-x64/-/openbsd-x64-0.28.1.tgz",
++      "integrity": "sha512-i/ZLIOafE0Z8cI/XANJAixoJL/uRAoS2xOA3rb0xN+KK0K177cMAsQYkzHtBrtMXAKuAc7HGgcWiZ/sRC1Nxgw==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "openbsd"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/openharmony-arm64": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/openharmony-arm64/-/openharmony-arm64-0.28.1.tgz",
++      "integrity": "sha512-ge+Z7EXFNt2BO1oAMsVpiQ8EwndV9i1xXerAeTIK7AtPs3bKFXQM7nlRxDSIUIMeueR1CNXxqztLzdNeReKBJg==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "openharmony"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/sunos-x64": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/sunos-x64/-/sunos-x64-0.28.1.tgz",
++      "integrity": "sha512-BEjgtECkL3vY+SaSQ6nzVfiALUeFxpawyp8Jmf5PtYhf1Ug40N1h/hxlhts+f1FvSvarEigdxS3BlSMI2PJLcQ==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "sunos"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/win32-arm64": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/win32-arm64/-/win32-arm64-0.28.1.tgz",
++      "integrity": "sha512-lCv9eK/H6ZJWbE7bh2nw54CZ9M2nupBxJcTsdk/QQnWkdSjKGuxmmH8/GWrlT1eMmZfn4dGcCjRte397WqfQXA==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/win32-ia32": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/win32-ia32/-/win32-ia32-0.28.1.tgz",
++      "integrity": "sha512-zvb/mB2bSCoJOpoCBgYKKpX6YM6mJBlBUVUtVj41DlZJVEB6/0CKlRYxP5wWl1C1ILiCoAU5wZZ4q1P3qeS6Eg==",
++      "cpu": [
++        "ia32"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/win32-x64": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/@esbuild/win32-x64/-/win32-x64-0.28.1.tgz",
++      "integrity": "sha512-bm4Mowrv+GXMlpWX++EcXw/iLyd1o3+bJkC2DkWXYVvgZCqD/bSj9ctZeAMC3cIxgjRVR2Dufaiu4YPxr5gW1A==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@img/colour": {
++      "version": "1.1.0",
++      "resolved": "https://registry.npmjs.org/@img/colour/-/colour-1.1.0.tgz",
++      "integrity": "sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@img/sharp-darwin-arm64": {
++      "version": "0.34.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-darwin-arm64/-/sharp-darwin-arm64-0.34.5.tgz",
++      "integrity": "sha512-imtQ3WMJXbMY4fxb/Ndp6HBTNVtWCUI0WdobyheGf5+ad6xX8VIDO8u2xE4qc/fr08CKG/7dDseFtn6M6g/r3w==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "engines": {
++        "node": "^18.17.0 || ^20.3.0 || >=21.0.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-darwin-arm64": "1.2.4"
++      }
++    },
++    "node_modules/@img/sharp-darwin-x64": {
++      "version": "0.34.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-darwin-x64/-/sharp-darwin-x64-0.34.5.tgz",
++      "integrity": "sha512-YNEFAF/4KQ/PeW0N+r+aVVsoIY0/qxxikF2SWdp+NRkmMB7y9LBZAVqQ4yhGCm/H3H270OSykqmQMKLBhBJDEw==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "engines": {
++        "node": "^18.17.0 || ^20.3.0 || >=21.0.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-darwin-x64": "1.2.4"
++      }
++    },
++    "node_modules/@img/sharp-libvips-darwin-arm64": {
++      "version": "1.2.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-darwin-arm64/-/sharp-libvips-darwin-arm64-1.2.4.tgz",
++      "integrity": "sha512-zqjjo7RatFfFoP0MkQ51jfuFZBnVE2pRiaydKJ1G/rHZvnsrHAOcQALIi9sA5co5xenQdTugCvtb1cuf78Vf4g==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-darwin-x64": {
++      "version": "1.2.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-darwin-x64/-/sharp-libvips-darwin-x64-1.2.4.tgz",
++      "integrity": "sha512-1IOd5xfVhlGwX+zXv2N93k0yMONvUlANylbJw1eTah8K/Jtpi15KC+WSiaX/nBmbm2HxRM1gZ0nSdjSsrZbGKg==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linux-arm": {
++      "version": "1.2.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-arm/-/sharp-libvips-linux-arm-1.2.4.tgz",
++      "integrity": "sha512-bFI7xcKFELdiNCVov8e44Ia4u2byA+l3XtsAj+Q8tfCwO6BQ8iDojYdvoPMqsKDkuoOo+X6HZA0s0q11ANMQ8A==",
++      "cpu": [
++        "arm"
++      ],
++      "dev": true,
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linux-arm64": {
++      "version": "1.2.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-arm64/-/sharp-libvips-linux-arm64-1.2.4.tgz",
++      "integrity": "sha512-excjX8DfsIcJ10x1Kzr4RcWe1edC9PquDRRPx3YVCvQv+U5p7Yin2s32ftzikXojb1PIFc/9Mt28/y+iRklkrw==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linux-ppc64": {
++      "version": "1.2.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-ppc64/-/sharp-libvips-linux-ppc64-1.2.4.tgz",
++      "integrity": "sha512-FMuvGijLDYG6lW+b/UvyilUWu5Ayu+3r2d1S8notiGCIyYU/76eig1UfMmkZ7vwgOrzKzlQbFSuQfgm7GYUPpA==",
++      "cpu": [
++        "ppc64"
++      ],
++      "dev": true,
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linux-riscv64": {
++      "version": "1.2.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-riscv64/-/sharp-libvips-linux-riscv64-1.2.4.tgz",
++      "integrity": "sha512-oVDbcR4zUC0ce82teubSm+x6ETixtKZBh/qbREIOcI3cULzDyb18Sr/Wcyx7NRQeQzOiHTNbZFF1UwPS2scyGA==",
++      "cpu": [
++        "riscv64"
++      ],
++      "dev": true,
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linux-s390x": {
++      "version": "1.2.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-s390x/-/sharp-libvips-linux-s390x-1.2.4.tgz",
++      "integrity": "sha512-qmp9VrzgPgMoGZyPvrQHqk02uyjA0/QrTO26Tqk6l4ZV0MPWIW6LTkqOIov+J1yEu7MbFQaDpwdwJKhbJvuRxQ==",
++      "cpu": [
++        "s390x"
++      ],
++      "dev": true,
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linux-x64": {
++      "version": "1.2.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-x64/-/sharp-libvips-linux-x64-1.2.4.tgz",
++      "integrity": "sha512-tJxiiLsmHc9Ax1bz3oaOYBURTXGIRDODBqhveVHonrHJ9/+k89qbLl0bcJns+e4t4rvaNBxaEZsFtSfAdquPrw==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linuxmusl-arm64": {
++      "version": "1.2.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linuxmusl-arm64/-/sharp-libvips-linuxmusl-arm64-1.2.4.tgz",
++      "integrity": "sha512-FVQHuwx1IIuNow9QAbYUzJ+En8KcVm9Lk5+uGUQJHaZmMECZmOlix9HnH7n1TRkXMS0pGxIJokIVB9SuqZGGXw==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linuxmusl-x64": {
++      "version": "1.2.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linuxmusl-x64/-/sharp-libvips-linuxmusl-x64-1.2.4.tgz",
++      "integrity": "sha512-+LpyBk7L44ZIXwz/VYfglaX/okxezESc6UxDSoyo2Ks6Jxc4Y7sGjpgU9s4PMgqgjj1gZCylTieNamqA1MF7Dg==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-linux-arm": {
++      "version": "0.34.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-arm/-/sharp-linux-arm-0.34.5.tgz",
++      "integrity": "sha512-9dLqsvwtg1uuXBGZKsxem9595+ujv0sJ6Vi8wcTANSFpwV/GONat5eCkzQo/1O6zRIkh0m/8+5BjrRr7jDUSZw==",
++      "cpu": [
++        "arm"
++      ],
++      "dev": true,
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": "^18.17.0 || ^20.3.0 || >=21.0.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linux-arm": "1.2.4"
++      }
++    },
++    "node_modules/@img/sharp-linux-arm64": {
++      "version": "0.34.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-arm64/-/sharp-linux-arm64-0.34.5.tgz",
++      "integrity": "sha512-bKQzaJRY/bkPOXyKx5EVup7qkaojECG6NLYswgktOZjaXecSAeCWiZwwiFf3/Y+O1HrauiE3FVsGxFg8c24rZg==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": "^18.17.0 || ^20.3.0 || >=21.0.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linux-arm64": "1.2.4"
++      }
++    },
++    "node_modules/@img/sharp-linux-ppc64": {
++      "version": "0.34.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-ppc64/-/sharp-linux-ppc64-0.34.5.tgz",
++      "integrity": "sha512-7zznwNaqW6YtsfrGGDA6BRkISKAAE1Jo0QdpNYXNMHu2+0dTrPflTLNkpc8l7MUP5M16ZJcUvysVWWrMefZquA==",
++      "cpu": [
++        "ppc64"
++      ],
++      "dev": true,
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": "^18.17.0 || ^20.3.0 || >=21.0.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linux-ppc64": "1.2.4"
++      }
++    },
++    "node_modules/@img/sharp-linux-riscv64": {
++      "version": "0.34.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-riscv64/-/sharp-linux-riscv64-0.34.5.tgz",
++      "integrity": "sha512-51gJuLPTKa7piYPaVs8GmByo7/U7/7TZOq+cnXJIHZKavIRHAP77e3N2HEl3dgiqdD/w0yUfiJnII77PuDDFdw==",
++      "cpu": [
++        "riscv64"
++      ],
++      "dev": true,
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": "^18.17.0 || ^20.3.0 || >=21.0.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linux-riscv64": "1.2.4"
++      }
++    },
++    "node_modules/@img/sharp-linux-s390x": {
++      "version": "0.34.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-s390x/-/sharp-linux-s390x-0.34.5.tgz",
++      "integrity": "sha512-nQtCk0PdKfho3eC5MrbQoigJ2gd1CgddUMkabUj+rBevs8tZ2cULOx46E7oyX+04WGfABgIwmMC0VqieTiR4jg==",
++      "cpu": [
++        "s390x"
++      ],
++      "dev": true,
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": "^18.17.0 || ^20.3.0 || >=21.0.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linux-s390x": "1.2.4"
++      }
++    },
++    "node_modules/@img/sharp-linux-x64": {
++      "version": "0.34.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-x64/-/sharp-linux-x64-0.34.5.tgz",
++      "integrity": "sha512-MEzd8HPKxVxVenwAa+JRPwEC7QFjoPWuS5NZnBt6B3pu7EG2Ge0id1oLHZpPJdn3OQK+BQDiw9zStiHBTJQQQQ==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": "^18.17.0 || ^20.3.0 || >=21.0.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linux-x64": "1.2.4"
++      }
++    },
++    "node_modules/@img/sharp-linuxmusl-arm64": {
++      "version": "0.34.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linuxmusl-arm64/-/sharp-linuxmusl-arm64-0.34.5.tgz",
++      "integrity": "sha512-fprJR6GtRsMt6Kyfq44IsChVZeGN97gTD331weR1ex1c1rypDEABN6Tm2xa1wE6lYb5DdEnk03NZPqA7Id21yg==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": "^18.17.0 || ^20.3.0 || >=21.0.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linuxmusl-arm64": "1.2.4"
++      }
++    },
++    "node_modules/@img/sharp-linuxmusl-x64": {
++      "version": "0.34.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linuxmusl-x64/-/sharp-linuxmusl-x64-0.34.5.tgz",
++      "integrity": "sha512-Jg8wNT1MUzIvhBFxViqrEhWDGzqymo3sV7z7ZsaWbZNDLXRJZoRGrjulp60YYtV4wfY8VIKcWidjojlLcWrd8Q==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": "^18.17.0 || ^20.3.0 || >=21.0.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linuxmusl-x64": "1.2.4"
++      }
++    },
++    "node_modules/@img/sharp-wasm32": {
++      "version": "0.34.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-wasm32/-/sharp-wasm32-0.34.5.tgz",
++      "integrity": "sha512-OdWTEiVkY2PHwqkbBI8frFxQQFekHaSSkUIJkwzclWZe64O1X4UlUjqqqLaPbUpMOQk6FBu/HtlGXNblIs0huw==",
++      "cpu": [
++        "wasm32"
++      ],
++      "dev": true,
++      "license": "Apache-2.0 AND LGPL-3.0-or-later AND MIT",
++      "optional": true,
++      "dependencies": {
++        "@emnapi/runtime": "^1.7.0"
++      },
++      "engines": {
++        "node": "^18.17.0 || ^20.3.0 || >=21.0.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-win32-arm64": {
++      "version": "0.34.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-win32-arm64/-/sharp-win32-arm64-0.34.5.tgz",
++      "integrity": "sha512-WQ3AgWCWYSb2yt+IG8mnC6Jdk9Whs7O0gxphblsLvdhSpSTtmu69ZG1Gkb6NuvxsNACwiPV6cNSZNzt0KPsw7g==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "Apache-2.0 AND LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "engines": {
++        "node": "^18.17.0 || ^20.3.0 || >=21.0.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-win32-ia32": {
++      "version": "0.34.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-win32-ia32/-/sharp-win32-ia32-0.34.5.tgz",
++      "integrity": "sha512-FV9m/7NmeCmSHDD5j4+4pNI8Cp3aW+JvLoXcTUo0IqyjSfAZJ8dIUmijx1qaJsIiU+Hosw6xM5KijAWRJCSgNg==",
++      "cpu": [
++        "ia32"
++      ],
++      "dev": true,
++      "license": "Apache-2.0 AND LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "engines": {
++        "node": "^18.17.0 || ^20.3.0 || >=21.0.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-win32-x64": {
++      "version": "0.34.5",
++      "resolved": "https://registry.npmjs.org/@img/sharp-win32-x64/-/sharp-win32-x64-0.34.5.tgz",
++      "integrity": "sha512-+29YMsqY2/9eFEiW93eqWnuLcWcufowXewwSNIT6UwZdUUCrM3oFjMWH/Z6/TMmb4hlFenmfAVbpWeup2jryCw==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "Apache-2.0 AND LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "engines": {
++        "node": "^18.17.0 || ^20.3.0 || >=21.0.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@jridgewell/resolve-uri": {
++      "version": "3.1.2",
++      "resolved": "https://registry.npmjs.org/@jridgewell/resolve-uri/-/resolve-uri-3.1.2.tgz",
++      "integrity": "sha512-bRISgCIjP20/tbWSPWMEi54QVPRZExkuD9lJL+UIxUKtwVJA8wW1Trb1jMs1RFXo1CBTNZ/5hpC9QvmKWdopKw==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=6.0.0"
++      }
++    },
++    "node_modules/@jridgewell/sourcemap-codec": {
++      "version": "1.5.5",
++      "resolved": "https://registry.npmjs.org/@jridgewell/sourcemap-codec/-/sourcemap-codec-1.5.5.tgz",
++      "integrity": "sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==",
++      "dev": true,
++      "license": "MIT"
++    },
++    "node_modules/@jridgewell/trace-mapping": {
++      "version": "0.3.9",
++      "resolved": "https://registry.npmjs.org/@jridgewell/trace-mapping/-/trace-mapping-0.3.9.tgz",
++      "integrity": "sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "@jridgewell/resolve-uri": "^3.0.3",
++        "@jridgewell/sourcemap-codec": "^1.4.10"
++      }
++    },
++    "node_modules/@poppinss/colors": {
++      "version": "4.1.6",
++      "resolved": "https://registry.npmjs.org/@poppinss/colors/-/colors-4.1.6.tgz",
++      "integrity": "sha512-H9xkIdFswbS8n1d6vmRd8+c10t2Qe+rZITbbDHHkQixH5+2x1FDGmi/0K+WgWiqQFKPSlIYB7jlH6Kpfn6Fleg==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "kleur": "^4.1.5"
++      }
++    },
++    "node_modules/@poppinss/dumper": {
++      "version": "0.6.5",
++      "resolved": "https://registry.npmjs.org/@poppinss/dumper/-/dumper-0.6.5.tgz",
++      "integrity": "sha512-NBdYIb90J7LfOI32dOewKI1r7wnkiH6m920puQ3qHUeZkxNkQiFnXVWoE6YtFSv6QOiPPf7ys6i+HWWecDz7sw==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "@poppinss/colors": "^4.1.5",
++        "@sindresorhus/is": "^7.0.2",
++        "supports-color": "^10.0.0"
++      }
++    },
++    "node_modules/@poppinss/exception": {
++      "version": "1.2.3",
++      "resolved": "https://registry.npmjs.org/@poppinss/exception/-/exception-1.2.3.tgz",
++      "integrity": "sha512-dCED+QRChTVatE9ibtoaxc+WkdzOSjYTKi/+uacHWIsfodVfpsueo3+DKpgU5Px8qXjgmXkSvhXvSCz3fnP9lw==",
++      "dev": true,
++      "license": "MIT"
++    },
++    "node_modules/@sindresorhus/is": {
++      "version": "7.2.0",
++      "resolved": "https://registry.npmjs.org/@sindresorhus/is/-/is-7.2.0.tgz",
++      "integrity": "sha512-P1Cz1dWaFfR4IR+U13mqqiGsLFf1KbayybWwdd2vfctdV6hDpUkgCY0nKOLLTMSoRd/jJNjtbqzf13K8DCCXQw==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=18"
++      },
++      "funding": {
++        "url": "https://github.com/sindresorhus/is?sponsor=1"
++      }
++    },
++    "node_modules/@speed-highlight/core": {
++      "version": "1.2.17",
++      "resolved": "https://registry.npmjs.org/@speed-highlight/core/-/core-1.2.17.tgz",
++      "integrity": "sha512-Z92FwKpCtfaW1V0jTU/fh3QzYEZN8wDwrzRIBoADCJfn4mJCNcJN/XegifX7BDrQ8/h9Xh/JnbyMchL0FqXrkg==",
++      "dev": true,
++      "license": "CC0-1.0"
++    },
++    "node_modules/blake3-wasm": {
++      "version": "2.1.5",
++      "resolved": "https://registry.npmjs.org/blake3-wasm/-/blake3-wasm-2.1.5.tgz",
++      "integrity": "sha512-F1+K8EbfOZE49dtoPtmxUQrpXaBIl3ICvasLh+nJta0xkz+9kF/7uet9fLnwKqhDrmj6g+6K3Tw9yQPUg2ka5g==",
++      "dev": true,
++      "license": "MIT"
++    },
++    "node_modules/cookie": {
++      "version": "1.1.1",
++      "resolved": "https://registry.npmjs.org/cookie/-/cookie-1.1.1.tgz",
++      "integrity": "sha512-ei8Aos7ja0weRpFzJnEA9UHJ/7XQmqglbRwnf2ATjcB9Wq874VKH9kfjjirM6UhU2/E5fFYadylyhFldcqSidQ==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=18"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
++    "node_modules/detect-libc": {
++      "version": "2.1.2",
++      "resolved": "https://registry.npmjs.org/detect-libc/-/detect-libc-2.1.2.tgz",
++      "integrity": "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==",
++      "dev": true,
++      "license": "Apache-2.0",
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/error-stack-parser-es": {
++      "version": "1.0.5",
++      "resolved": "https://registry.npmjs.org/error-stack-parser-es/-/error-stack-parser-es-1.0.5.tgz",
++      "integrity": "sha512-5qucVt2XcuGMcEGgWI7i+yZpmpByQ8J1lHhcL7PwqCwu9FPP3VUXzT4ltHe5i2z9dePwEHcDVOAfSnHsOlCXRA==",
++      "dev": true,
++      "license": "MIT",
++      "funding": {
++        "url": "https://github.com/sponsors/antfu"
++      }
++    },
++    "node_modules/esbuild": {
++      "version": "0.28.1",
++      "resolved": "https://registry.npmjs.org/esbuild/-/esbuild-0.28.1.tgz",
++      "integrity": "sha512-HrJrvZv5ayxBzPfwphOoNzkzOIIlifzk0KJrGK2c8R4+LKpMtpYLQeUdjnwjWv/LZlkH2laZk+4w78pi99D4Vw==",
++      "dev": true,
++      "hasInstallScript": true,
++      "license": "MIT",
++      "bin": {
++        "esbuild": "bin/esbuild"
++      },
++      "engines": {
++        "node": ">=18"
++      },
++      "optionalDependencies": {
++        "@esbuild/aix-ppc64": "0.28.1",
++        "@esbuild/android-arm": "0.28.1",
++        "@esbuild/android-arm64": "0.28.1",
++        "@esbuild/android-x64": "0.28.1",
++        "@esbuild/darwin-arm64": "0.28.1",
++        "@esbuild/darwin-x64": "0.28.1",
++        "@esbuild/freebsd-arm64": "0.28.1",
++        "@esbuild/freebsd-x64": "0.28.1",
++        "@esbuild/linux-arm": "0.28.1",
++        "@esbuild/linux-arm64": "0.28.1",
++        "@esbuild/linux-ia32": "0.28.1",
++        "@esbuild/linux-loong64": "0.28.1",
++        "@esbuild/linux-mips64el": "0.28.1",
++        "@esbuild/linux-ppc64": "0.28.1",
++        "@esbuild/linux-riscv64": "0.28.1",
++        "@esbuild/linux-s390x": "0.28.1",
++        "@esbuild/linux-x64": "0.28.1",
++        "@esbuild/netbsd-arm64": "0.28.1",
++        "@esbuild/netbsd-x64": "0.28.1",
++        "@esbuild/openbsd-arm64": "0.28.1",
++        "@esbuild/openbsd-x64": "0.28.1",
++        "@esbuild/openharmony-arm64": "0.28.1",
++        "@esbuild/sunos-x64": "0.28.1",
++        "@esbuild/win32-arm64": "0.28.1",
++        "@esbuild/win32-ia32": "0.28.1",
++        "@esbuild/win32-x64": "0.28.1"
++      }
++    },
++    "node_modules/fsevents": {
++      "version": "2.3.3",
++      "resolved": "https://registry.npmjs.org/fsevents/-/fsevents-2.3.3.tgz",
++      "integrity": "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==",
++      "dev": true,
++      "hasInstallScript": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "engines": {
++        "node": "^8.16.0 || ^10.6.0 || >=11.0.0"
++      }
++    },
++    "node_modules/kleur": {
++      "version": "4.1.5",
++      "resolved": "https://registry.npmjs.org/kleur/-/kleur-4.1.5.tgz",
++      "integrity": "sha512-o+NO+8WrRiQEE4/7nwRJhN1HWpVmJm511pBHUxPLtp0BUISzlBplORYSmTclCnJvQq2tKu/sgl3xVpkc7ZWuQQ==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=6"
++      }
++    },
++    "node_modules/miniflare": {
++      "version": "4.20260706.0",
++      "resolved": "https://registry.npmjs.org/miniflare/-/miniflare-4.20260706.0.tgz",
++      "integrity": "sha512-UiqGo9Es/D7kJvDVpjhTQ/M2ppCSCsRc5EEKec6i4BvnCkFCRaZHRmFkMHzLhlg+daSZ+zvBaycWmgLZHn/1tQ==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "@cspotcode/source-map-support": "0.8.1",
++        "sharp": "0.34.5",
++        "undici": "7.28.0",
++        "workerd": "1.20260706.1",
++        "ws": "8.21.0",
++        "youch": "4.1.0-beta.10"
++      },
++      "bin": {
++        "miniflare": "bootstrap.js"
++      },
++      "engines": {
++        "node": ">=22.0.0"
++      }
++    },
++    "node_modules/path-to-regexp": {
++      "version": "6.3.0",
++      "resolved": "https://registry.npmjs.org/path-to-regexp/-/path-to-regexp-6.3.0.tgz",
++      "integrity": "sha512-Yhpw4T9C6hPpgPeA28us07OJeqZ5EzQTkbfwuhsUg0c237RomFoETJgmp2sa3F/41gfLE6G5cqcYwznmeEeOlQ==",
++      "dev": true,
++      "license": "MIT"
++    },
++    "node_modules/pathe": {
++      "version": "2.0.3",
++      "resolved": "https://registry.npmjs.org/pathe/-/pathe-2.0.3.tgz",
++      "integrity": "sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==",
++      "dev": true,
++      "license": "MIT"
++    },
++    "node_modules/semver": {
++      "version": "7.8.5",
++      "resolved": "https://registry.npmjs.org/semver/-/semver-7.8.5.tgz",
++      "integrity": "sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==",
++      "dev": true,
++      "license": "ISC",
++      "bin": {
++        "semver": "bin/semver.js"
++      },
++      "engines": {
++        "node": ">=10"
++      }
++    },
++    "node_modules/sharp": {
++      "version": "0.34.5",
++      "resolved": "https://registry.npmjs.org/sharp/-/sharp-0.34.5.tgz",
++      "integrity": "sha512-Ou9I5Ft9WNcCbXrU9cMgPBcCK8LiwLqcbywW3t4oDV37n1pzpuNLsYiAV8eODnjbtQlSDwZ2cUEeQz4E54Hltg==",
++      "dev": true,
++      "hasInstallScript": true,
++      "license": "Apache-2.0",
++      "dependencies": {
++        "@img/colour": "^1.0.0",
++        "detect-libc": "^2.1.2",
++        "semver": "^7.7.3"
++      },
++      "engines": {
++        "node": "^18.17.0 || ^20.3.0 || >=21.0.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-darwin-arm64": "0.34.5",
++        "@img/sharp-darwin-x64": "0.34.5",
++        "@img/sharp-libvips-darwin-arm64": "1.2.4",
++        "@img/sharp-libvips-darwin-x64": "1.2.4",
++        "@img/sharp-libvips-linux-arm": "1.2.4",
++        "@img/sharp-libvips-linux-arm64": "1.2.4",
++        "@img/sharp-libvips-linux-ppc64": "1.2.4",
++        "@img/sharp-libvips-linux-riscv64": "1.2.4",
++        "@img/sharp-libvips-linux-s390x": "1.2.4",
++        "@img/sharp-libvips-linux-x64": "1.2.4",
++        "@img/sharp-libvips-linuxmusl-arm64": "1.2.4",
++        "@img/sharp-libvips-linuxmusl-x64": "1.2.4",
++        "@img/sharp-linux-arm": "0.34.5",
++        "@img/sharp-linux-arm64": "0.34.5",
++        "@img/sharp-linux-ppc64": "0.34.5",
++        "@img/sharp-linux-riscv64": "0.34.5",
++        "@img/sharp-linux-s390x": "0.34.5",
++        "@img/sharp-linux-x64": "0.34.5",
++        "@img/sharp-linuxmusl-arm64": "0.34.5",
++        "@img/sharp-linuxmusl-x64": "0.34.5",
++        "@img/sharp-wasm32": "0.34.5",
++        "@img/sharp-win32-arm64": "0.34.5",
++        "@img/sharp-win32-ia32": "0.34.5",
++        "@img/sharp-win32-x64": "0.34.5"
++      }
++    },
++    "node_modules/supports-color": {
++      "version": "10.2.2",
++      "resolved": "https://registry.npmjs.org/supports-color/-/supports-color-10.2.2.tgz",
++      "integrity": "sha512-SS+jx45GF1QjgEXQx4NJZV9ImqmO2NPz5FNsIHrsDjh2YsHnawpan7SNQ1o8NuhrbHZy9AZhIoCUiCeaW/C80g==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=18"
++      },
++      "funding": {
++        "url": "https://github.com/chalk/supports-color?sponsor=1"
++      }
++    },
++    "node_modules/tslib": {
++      "version": "2.8.1",
++      "resolved": "https://registry.npmjs.org/tslib/-/tslib-2.8.1.tgz",
++      "integrity": "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==",
++      "dev": true,
++      "license": "0BSD",
++      "optional": true
++    },
++    "node_modules/undici": {
++      "version": "7.28.0",
++      "resolved": "https://registry.npmjs.org/undici/-/undici-7.28.0.tgz",
++      "integrity": "sha512-cRZYrTDwWznlnRiPjggAGxZXanty6M8RV1ff8Wm4LWXBp7/IG8v5DnOm74DtUBp9OONpK75YlPnIjQqX0dBDtA==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=20.18.1"
++      }
++    },
++    "node_modules/unenv": {
++      "version": "2.0.0-rc.24",
++      "resolved": "https://registry.npmjs.org/unenv/-/unenv-2.0.0-rc.24.tgz",
++      "integrity": "sha512-i7qRCmY42zmCwnYlh9H2SvLEypEFGye5iRmEMKjcGi7zk9UquigRjFtTLz0TYqr0ZGLZhaMHl/foy1bZR+Cwlw==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "pathe": "^2.0.3"
++      }
++    },
++    "node_modules/workerd": {
++      "version": "1.20260706.1",
++      "resolved": "https://registry.npmjs.org/workerd/-/workerd-1.20260706.1.tgz",
++      "integrity": "sha512-0DOmgysJiPZRwtlg9Bh70aDnHuVech70fKVM4721RbdfewL29ODxn4TpgkusybLYrQAkgHkW53SUt2AdkBa+Og==",
++      "dev": true,
++      "hasInstallScript": true,
++      "license": "Apache-2.0",
++      "bin": {
++        "workerd": "bin/workerd"
++      },
++      "engines": {
++        "node": ">=16"
++      },
++      "optionalDependencies": {
++        "@cloudflare/workerd-darwin-64": "1.20260706.1",
++        "@cloudflare/workerd-darwin-arm64": "1.20260706.1",
++        "@cloudflare/workerd-linux-64": "1.20260706.1",
++        "@cloudflare/workerd-linux-arm64": "1.20260706.1",
++        "@cloudflare/workerd-windows-64": "1.20260706.1"
++      }
++    },
++    "node_modules/wrangler": {
++      "version": "4.108.0",
++      "resolved": "https://registry.npmjs.org/wrangler/-/wrangler-4.108.0.tgz",
++      "integrity": "sha512-mJnY6vf2Tminfo0Jy5OreBgUjIKW3iM1TQtOrZZRpFUyiQvAYUDVN0aRcDn8/aEfF0bmZgcixRdwwVHZMZaE7w==",
++      "dev": true,
++      "license": "MIT OR Apache-2.0",
++      "dependencies": {
++        "@cloudflare/kv-asset-handler": "0.5.0",
++        "@cloudflare/unenv-preset": "2.16.1",
++        "blake3-wasm": "2.1.5",
++        "esbuild": "0.28.1",
++        "miniflare": "4.20260706.0",
++        "path-to-regexp": "6.3.0",
++        "unenv": "2.0.0-rc.24",
++        "workerd": "1.20260706.1"
++      },
++      "bin": {
++        "cf-wrangler": "bin/cf-wrangler.js",
++        "wrangler": "bin/wrangler.js",
++        "wrangler2": "bin/wrangler.js"
++      },
++      "engines": {
++        "node": ">=22.0.0"
++      },
++      "optionalDependencies": {
++        "fsevents": "2.3.3"
++      },
++      "peerDependencies": {
++        "@cloudflare/workers-types": "^5.20260706.1"
++      },
++      "peerDependenciesMeta": {
++        "@cloudflare/workers-types": {
++          "optional": true
++        }
++      }
++    },
++    "node_modules/ws": {
++      "version": "8.21.0",
++      "resolved": "https://registry.npmjs.org/ws/-/ws-8.21.0.tgz",
++      "integrity": "sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=10.0.0"
++      },
++      "peerDependencies": {
++        "bufferutil": "^4.0.1",
++        "utf-8-validate": ">=5.0.2"
++      },
++      "peerDependenciesMeta": {
++        "bufferutil": {
++          "optional": true
++        },
++        "utf-8-validate": {
++          "optional": true
++        }
++      }
++    },
++    "node_modules/youch": {
++      "version": "4.1.0-beta.10",
++      "resolved": "https://registry.npmjs.org/youch/-/youch-4.1.0-beta.10.tgz",
++      "integrity": "sha512-rLfVLB4FgQneDr0dv1oddCVZmKjcJ6yX6mS4pU82Mq/Dt9a3cLZQ62pDBL4AUO+uVrCvtWz3ZFUL2HFAFJ/BXQ==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "@poppinss/colors": "^4.1.5",
++        "@poppinss/dumper": "^0.6.4",
++        "@speed-highlight/core": "^1.2.7",
++        "cookie": "^1.0.2",
++        "youch-core": "^0.3.3"
++      }
++    },
++    "node_modules/youch-core": {
++      "version": "0.3.3",
++      "resolved": "https://registry.npmjs.org/youch-core/-/youch-core-0.3.3.tgz",
++      "integrity": "sha512-ho7XuGjLaJ2hWHoK8yFnsUGy2Y5uDpqSTq1FkHLK4/oqKtyUU1AFbOOxY4IpC9f0fTLjwYbslUz0Po5BpD1wrA==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "@poppinss/exception": "^1.2.2",
++        "error-stack-parser-es": "^1.0.5"
++      }
++    }
++  }
++}
+diff --git a/src/hrpt/__testUtils__/fakeD1.js b/src/hrpt/__testUtils__/fakeD1.js
+new file mode 100644
+index 0000000..967aa79
+--- /dev/null
++++ b/src/hrpt/__testUtils__/fakeD1.js
+@@ -0,0 +1,110 @@
++/**
++ * A minimal in-memory fake of the D1 Workers Binding surface area that
++ * src/hrpt/d1Client.js actually calls: `env.DB.prepare(sql).bind(...).run()`
++ * and `env.DB.batch([...])`.
++ *
++ * IMPORTANT — what this is and isn't:
++ *   - It is NOT a SQL engine. It recognizes only the exact statement shapes
++ *     d1Client.js issues today (a windowed DELETE, a plain multi-column
++ *     INSERT, and an `INSERT ... ON CONFLICT(field_id) DO UPDATE` upsert)
++ *     and applies them to a plain in-memory array per table.
++ *   - It exists so d1Client.js's request-construction and
++ *     error-propagation logic (which statements get built, in what order,
++ *     with what bound args, and how failures surface) can be unit-tested
++ *     with plain `node --test`, without requiring the Workers runtime.
++ *   - It does NOT exercise real D1/SQLite semantics: no real transactions
++ *     (a "batch" here applies statements one at a time and does not roll
++ *     back earlier statements in the same batch if a later one fails),
++ *     no real constraint enforcement, no real SQL parsing. Passing tests
++ *     against this fake is not proof the real D1 database behaves
++ *     identically — that requires `wrangler dev` (Miniflare-backed local
++ *     D1) or a real D1 instance, which this project's `node --test` setup
++ *     deliberately does not spin up. If that gap matters for a given
++ *     change, say so rather than treating these tests as full coverage.
++ */
++
++function createFakeD1({ failTables = [] } = {}) {
++  const tables = {
++    field_permit_cache: [],
++    field_sync_meta: [],
++  };
++  const calls = [];
++
++  function tableNameFromSql(sql) {
++    const m = sql.match(/(?:FROM|INTO)\s+(\w+)/i);
++    return m ? m[1] : null;
++  }
++
++  function execute(sql, args) {
++    const table = tableNameFromSql(sql);
++    calls.push({ sql, args, table });
++
++    if (table && failTables.includes(table)) {
++      return { success: false, error: `simulated failure for table ${table}` };
++    }
++    if (!table || !(table in tables)) {
++      return { success: false, error: `fake D1: unknown table in statement: ${sql}` };
++    }
++
++    const trimmed = sql.trim();
++
++    if (/^DELETE/i.test(trimmed)) {
++      const [fieldId, minDate, maxDate] = args;
++      tables[table] = tables[table].filter(
++        (row) => !(row.field_id === fieldId && row.permit_date >= minDate && row.permit_date <= maxDate)
++      );
++      return { success: true };
++    }
++
++    if (/^INSERT/i.test(trimmed)) {
++      if (table === "field_permit_cache") {
++        const [field_id, permit_date, start_time, end_time, event_name] = args;
++        tables[table].push({ field_id, permit_date, start_time, end_time, event_name });
++        return { success: true };
++      }
++      if (table === "field_sync_meta") {
++        const [field_id, last_permit_sync_at, live_availability_status, permit_source_url] = args;
++        const idx = tables[table].findIndex((row) => row.field_id === field_id);
++        const row = { field_id, last_permit_sync_at, live_availability_status, permit_source_url };
++        if (idx >= 0) tables[table][idx] = row;
++        else tables[table].push(row);
++        return { success: true };
++      }
++    }
++
++    return { success: false, error: `fake D1 does not recognize statement: ${sql}` };
++  }
++
++  function makeStatement(sql) {
++    let boundArgs = [];
++    return {
++      bind(...args) {
++        boundArgs = args;
++        return this;
++      },
++      async run() {
++        return execute(sql, boundArgs);
++      },
++      // Exposed for batch(): batch() needs to run the same bound statement.
++      _sql: sql,
++      _args: () => boundArgs,
++    };
++  }
++
++  const db = {
++    prepare(sql) {
++      return makeStatement(sql);
++    },
++    async batch(statements) {
++      const results = [];
++      for (const stmt of statements) {
++        results.push(await stmt.run());
++      }
++      return results;
++    },
++  };
++
++  return { db, tables, calls };
++}
++
++export { createFakeD1 };
+diff --git a/src/hrpt/d1Client.js b/src/hrpt/d1Client.js
+new file mode 100644
+index 0000000..424c1ed
+--- /dev/null
++++ b/src/hrpt/d1Client.js
+@@ -0,0 +1,115 @@
++/**
++ * D1 client for the HRPT sync worker.
++ *
++ * Replaces supabaseClient.js (a hand-written PostgREST-over-`fetch` client)
++ * now that the storage backend is Cloudflare D1. D1 is reached through a
++ * Workers Binding (`env.DB`, configured in wrangler.jsonc), not an HTTP
++ * REST URL — there is no bearer-token secret to configure here; access is
++ * gated by the Worker's own deployment/binding, not by a credential read
++ * from `env`. That's why this client is simpler than supabaseClient.js: no
++ * URL building, no auth headers, no `fetchImpl` injection for tests (D1
++ * statements are mocked directly instead — see d1Client.test.js).
++ *
++ * Schema: see migrations/0001_init.sql for the authoritative DDL. In brief:
++ *   field_permit_cache(field_id, permit_date, start_time, end_time, event_name)
++ *   field_sync_meta(field_id UNIQUE/PRIMARY KEY, last_permit_sync_at,
++ *     live_availability_status, permit_source_url)
++ *
++ * Error-handling note: the Workers D1 binding's exact failure signaling
++ * (a rejected promise vs. a resolved `{ success: false, error }` result)
++ * has varied across D1's API evolution, so both call sites below check for
++ * both: a thrown/rejected error is caught and re-wrapped, and a resolved
++ * result with `success === false` is treated as a failure too. Either way
++ * failures are surfaced as a thrown Error with the field/table in the
++ * message, and — same integrity rule as the Supabase version — a failure
++ * on one field's statements never touches another field's rows, since
++ * each field's delete+insert runs in its own `env.DB.batch()` call.
++ */
++
++function assertConfigured(env) {
++  if (!env.DB) throw new Error("DB (D1 binding) is not configured — see wrangler.jsonc d1_databases");
++}
++
++/** Run one prepared statement and normalize both throw- and success:false-style failures into a thrown Error. */
++async function runStatement(stmt, { fieldId, table, action }) {
++  let result;
++  try {
++    result = await stmt.run();
++  } catch (err) {
++    throw new Error(`D1 ${action} failed for field_id=${fieldId} on ${table}: ${err && err.message ? err.message : err}`);
++  }
++  if (result && result.success === false) {
++    throw new Error(`D1 ${action} failed for field_id=${fieldId} on ${table}: ${result.error || "unknown error"}`);
++  }
++  return result;
++}
++
++/** Run a batch of prepared statements and normalize failures the same way runStatement() does. */
++async function runBatch(env, stmts, { fieldId, table, action }) {
++  let results;
++  try {
++    results = await env.DB.batch(stmts);
++  } catch (err) {
++    throw new Error(`D1 ${action} (batch) failed for field_id=${fieldId} on ${table}: ${err && err.message ? err.message : err}`);
++  }
++  const failed = Array.isArray(results) ? results.find((r) => r && r.success === false) : null;
++  if (failed) {
++    throw new Error(`D1 ${action} (batch) failed for field_id=${fieldId} on ${table}: ${failed.error || "unknown error"}`);
++  }
++  return results;
++}
++
++/**
++ * Delete every field_permit_cache row for `fieldId` whose permit_date falls
++ * within [minDate, maxDate] (inclusive), then insert `rows` — as a single
++ * `env.DB.batch()` call, which D1 runs as one implicit transaction. That
++ * gives us (at least) the same guarantee the old two-HTTP-call Supabase
++ * version had to work to preserve: if the insert half fails, the delete
++ * half is not left applied on its own — and it's scoped to a single
++ * field's exact parsed window, so a failure here never touches another
++ * field's cached rows (see sync.js for the per-field try/catch).
++ *
++ * Never called with an empty `rows` array by the caller unless the field
++ * genuinely had zero booked slots in its parsed window (a legitimate "all
++ * available" result) — see sync.js for the empty-vs-failed distinction.
++ */
++async function replaceFieldPermitWindow(env, { table, fieldId, minDate, maxDate, rows }) {
++  assertConfigured(env);
++
++  const deleteStmt = env.DB.prepare(
++    `DELETE FROM ${table} WHERE field_id = ? AND permit_date >= ? AND permit_date <= ?`
++  ).bind(fieldId, minDate, maxDate);
++
++  if (rows.length === 0) {
++    await runStatement(deleteStmt, { fieldId, table, action: "delete" });
++    return { deleted: true, inserted: 0 };
++  }
++
++  const insertStmts = rows.map((r) =>
++    env.DB.prepare(
++      `INSERT INTO ${table} (field_id, permit_date, start_time, end_time, event_name) VALUES (?, ?, ?, ?, ?)`
++    ).bind(r.field_id, r.permit_date, r.start_time, r.end_time, r.event_name)
++  );
++
++  await runBatch(env, [deleteStmt, ...insertStmts], { fieldId, table, action: "delete+insert" });
++
++  return { deleted: true, inserted: rows.length };
++}
++
++/** Upsert one field_sync_meta row, keyed on the UNIQUE/PRIMARY KEY field_id constraint (see migrations/0001_init.sql). */
++async function upsertSyncMeta(env, { table, row }) {
++  assertConfigured(env);
++
++  const stmt = env.DB.prepare(
++    `INSERT INTO ${table} (field_id, last_permit_sync_at, live_availability_status, permit_source_url)
++     VALUES (?, ?, ?, ?)
++     ON CONFLICT(field_id) DO UPDATE SET
++       last_permit_sync_at = excluded.last_permit_sync_at,
++       live_availability_status = excluded.live_availability_status,
++       permit_source_url = excluded.permit_source_url`
++  ).bind(row.field_id, row.last_permit_sync_at, row.live_availability_status, row.permit_source_url);
++
++  await runStatement(stmt, { fieldId: row.field_id, table, action: "sync-meta upsert" });
++}
++
++export { replaceFieldPermitWindow, upsertSyncMeta };
+diff --git a/src/hrpt/d1Client.test.js b/src/hrpt/d1Client.test.js
+new file mode 100644
+index 0000000..e877b05
+--- /dev/null
++++ b/src/hrpt/d1Client.test.js
+@@ -0,0 +1,154 @@
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import { replaceFieldPermitWindow, upsertSyncMeta } from "./d1Client.js";
++import { createFakeD1 } from "./__testUtils__/fakeD1.js";
++
++// See __testUtils__/fakeD1.js for exactly what this fake does and does not
++// prove: it tests d1Client.js's own statement-construction and
++// error-propagation logic, not real D1/SQLite semantics.
++
++test("replaceFieldPermitWindow deletes the field's date window then inserts rows, scoped to that field only", async () => {
++  const { db, tables } = createFakeD1();
++  const env = { DB: db };
++
++  // Seed a row for a different field and a row outside the window — both
++  // should survive untouched.
++  tables.field_permit_cache.push(
++    { field_id: "other-field", permit_date: "2026-06-28", start_time: "10:00", end_time: "11:00", event_name: "not touched" },
++    { field_id: "pier-25", permit_date: "2026-05-01", start_time: "09:00", end_time: "10:00", event_name: "outside window" }
++  );
++
++  const result = await replaceFieldPermitWindow(env, {
++    table: "field_permit_cache",
++    fieldId: "pier-25",
++    minDate: "2026-06-28",
++    maxDate: "2026-06-29",
++    rows: [
++      { field_id: "pier-25", permit_date: "2026-06-28", start_time: "18:00", end_time: "20:00", event_name: "League A" },
++      { field_id: "pier-25", permit_date: "2026-06-29", start_time: "09:00", end_time: "11:00", event_name: "League B" },
++    ],
++  });
++
++  assert.deepEqual(result, { deleted: true, inserted: 2 });
++  assert.equal(tables.field_permit_cache.length, 4); // 2 untouched + 2 newly inserted
++  assert.ok(tables.field_permit_cache.some((r) => r.field_id === "other-field"));
++  assert.ok(tables.field_permit_cache.some((r) => r.field_id === "pier-25" && r.permit_date === "2026-05-01"));
++  assert.equal(tables.field_permit_cache.filter((r) => r.field_id === "pier-25" && r.event_name === "League A").length, 1);
++});
++
++test("replaceFieldPermitWindow with zero rows deletes the window and inserts nothing (legitimate all-available result)", async () => {
++  const { db, tables } = createFakeD1();
++  const env = { DB: db };
++  tables.field_permit_cache.push({ field_id: "gansevoort", permit_date: "2026-06-28", start_time: null, end_time: null, event_name: "stale row" });
++
++  const result = await replaceFieldPermitWindow(env, {
++    table: "field_permit_cache",
++    fieldId: "gansevoort",
++    minDate: "2026-06-28",
++    maxDate: "2026-06-29",
++    rows: [],
++  });
++
++  assert.deepEqual(result, { deleted: true, inserted: 0 });
++  assert.equal(tables.field_permit_cache.length, 0);
++});
++
++test("replaceFieldPermitWindow throws (and does not corrupt other fields) when D1 reports a failure", async () => {
++  const { db, tables } = createFakeD1({ failTables: ["field_permit_cache"] });
++  const env = { DB: db };
++  tables.field_permit_cache.push({ field_id: "other-field", permit_date: "2026-06-28", start_time: "10:00", end_time: "11:00", event_name: "must survive" });
++
++  await assert.rejects(
++    () =>
++      replaceFieldPermitWindow(env, {
++        table: "field_permit_cache",
++        fieldId: "pier-25",
++        minDate: "2026-06-28",
++        maxDate: "2026-06-29",
++        rows: [{ field_id: "pier-25", permit_date: "2026-06-28", start_time: "18:00", end_time: "20:00", event_name: "League A" }],
++      }),
++    /D1 delete\+insert \(batch\) failed for field_id=pier-25/
++  );
++
++  // The fake doesn't roll back a mid-batch failure (see its doc comment),
++  // but the point we're proving here is that d1Client.js surfaces the
++  // failure as a thrown error rather than swallowing it or reporting
++  // success — sync.js relies on that to know not to count this field as
++  // written.
++  assert.ok(tables.field_permit_cache.some((r) => r.field_id === "other-field"));
++});
++
++test("upsertSyncMeta inserts a new row", async () => {
++  const { db, tables } = createFakeD1();
++  const env = { DB: db };
++
++  await upsertSyncMeta(env, {
++    table: "field_sync_meta",
++    row: { field_id: "pier-25", last_permit_sync_at: "2026-07-08T00:00:00.000Z", live_availability_status: "synced", permit_source_url: "https://example.com" },
++  });
++
++  assert.equal(tables.field_sync_meta.length, 1);
++  assert.equal(tables.field_sync_meta[0].field_id, "pier-25");
++});
++
++test("upsertSyncMeta updates the existing row for the same field_id instead of duplicating it", async () => {
++  const { db, tables } = createFakeD1();
++  const env = { DB: db };
++
++  const row1 = { field_id: "pier-25", last_permit_sync_at: "2026-07-08T00:00:00.000Z", live_availability_status: "synced", permit_source_url: "https://example.com" };
++  const row2 = { field_id: "pier-25", last_permit_sync_at: "2026-07-08T03:00:00.000Z", live_availability_status: "synced", permit_source_url: "https://example.com" };
++
++  await upsertSyncMeta(env, { table: "field_sync_meta", row: row1 });
++  await upsertSyncMeta(env, { table: "field_sync_meta", row: row2 });
++
++  assert.equal(tables.field_sync_meta.length, 1, "expected the field_id UNIQUE/PRIMARY KEY upsert to replace, not duplicate");
++  assert.equal(tables.field_sync_meta[0].last_permit_sync_at, "2026-07-08T03:00:00.000Z");
++});
++
++test("upsertSyncMeta throws when D1 reports a failure", async () => {
++  const { db } = createFakeD1({ failTables: ["field_sync_meta"] });
++  const env = { DB: db };
++
++  await assert.rejects(
++    () =>
++      upsertSyncMeta(env, {
++        table: "field_sync_meta",
++        row: { field_id: "pier-25", last_permit_sync_at: "now", live_availability_status: "synced", permit_source_url: "https://example.com" },
++      }),
++    /D1 sync-meta upsert failed for field_id=pier-25/
++  );
++});
++
++test("a thrown/rejected run() (not just success:false) is also wrapped into a thrown Error", async () => {
++  const env = {
++    DB: {
++      prepare() {
++        return {
++          bind() {
++            return this;
++          },
++          async run() {
++            throw new Error("simulated D1 binding exception");
++          },
++        };
++      },
++      async batch(stmts) {
++        // Mirror real D1: a throw from any statement rejects the whole batch.
++        for (const s of stmts) await s.run();
++        return [];
++      },
++    },
++  };
++
++  await assert.rejects(
++    () =>
++      replaceFieldPermitWindow(env, {
++        table: "field_permit_cache",
++        fieldId: "pier-25",
++        minDate: "2026-06-28",
++        maxDate: "2026-06-29",
++        rows: [{ field_id: "pier-25", permit_date: "2026-06-28", start_time: "18:00", end_time: "20:00", event_name: "League A" }],
++      }),
++    /D1 delete\+insert \(batch\) failed for field_id=pier-25.*simulated D1 binding exception/s
++  );
++});
+diff --git a/src/hrpt/supabaseClient.js b/src/hrpt/supabaseClient.js
+deleted file mode 100644
+index ab4fc64..0000000
+--- a/src/hrpt/supabaseClient.js
++++ /dev/null
+@@ -1,113 +0,0 @@
+-/**
+- * Minimal Supabase PostgREST client for the HRPT sync worker.
+- *
+- * Deliberately dependency-free (plain `fetch` against PostgREST) rather
+- * than pulling in `@supabase/supabase-js` — this keeps the Worker bundle
+- * small and every call easily mockable in tests via an injected `fetchImpl`.
+- *
+- * Requires (server-side only, never in client code):
+- *   env.SUPABASE_URL                — e.g. https://xxxx.supabase.co (same
+- *                                     project the frontend already reads
+- *                                     from; see SUPABASE_URL in
+- *                                     public/TrueSpordo.html)
+- *   env.SUPABASE_SERVICE_ROLE_KEY   — Wrangler secret. The anon key the
+- *                                     frontend uses is read-only by RLS
+- *                                     design and must NOT be used here for
+- *                                     writes.
+- *
+- * Schema requirements this client assumes (own conceptually by
+- * backend-engineer — flagged, not unilaterally migrated):
+- *   field_permit_cache(field_id, permit_date, start_time, end_time, event_name)
+- *     - needs a way to delete-then-replace the exact (field_id, permit_date)
+- *       window a sync run covered. No unique constraint is strictly
+- *       required for the delete+insert strategy used here (see sync.js),
+- *       but one on (field_id, permit_date, start_time) would make a
+- *       future upsert-based strategy possible and would guard against
+- *       accidental duplicate rows from a retried partial insert.
+- *   field_sync_meta(field_id, last_permit_sync_at, live_availability_status,
+- *     permit_source_url)
+- *     - needs a UNIQUE constraint on field_id for the upsert
+- *       (`on_conflict=field_id`) used here to work; this table doesn't
+- *       exist via migration in-repo yet, so this is a concrete ask for
+- *       backend-engineer.
+- */
+-
+-function assertConfigured(env) {
+-  if (!env.SUPABASE_URL) throw new Error("SUPABASE_URL is not configured");
+-  if (!env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured");
+-}
+-
+-function authHeaders(env) {
+-  return {
+-    apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+-    Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+-    "Content-Type": "application/json",
+-  };
+-}
+-
+-/**
+- * Delete every field_permit_cache row for `fieldId` whose permit_date falls
+- * within [minDate, maxDate] (inclusive), then insert `rows`. Scoped to a
+- * single field and to the exact date window the sync actually parsed, so a
+- * failure on one field's block never touches another field's cached rows,
+- * and dates outside what HRPT's page currently shows are left untouched.
+- *
+- * Never called with an empty `rows` array by the caller unless the field
+- * genuinely had zero booked slots in its parsed window (a legitimate "all
+- * available" result) — see sync.js for the empty-vs-failed distinction.
+- */
+-async function replaceFieldPermitWindow(env, { table, fieldId, minDate, maxDate, rows, fetchImpl = fetch }) {
+-  assertConfigured(env);
+-  const base = `${env.SUPABASE_URL}/rest/v1/${table}`;
+-  const headers = authHeaders(env);
+-
+-  const deleteUrl =
+-    `${base}?field_id=eq.${encodeURIComponent(fieldId)}` +
+-    `&permit_date=gte.${encodeURIComponent(minDate)}` +
+-    `&permit_date=lte.${encodeURIComponent(maxDate)}`;
+-
+-  const deleteResp = await fetchImpl(deleteUrl, {
+-    method: "DELETE",
+-    headers: { ...headers, Prefer: "return=minimal" },
+-  });
+-  if (!deleteResp.ok) {
+-    throw new Error(`Supabase delete failed for field_id=${fieldId} (${deleteResp.status}): ${await safeText(deleteResp)}`);
+-  }
+-
+-  if (rows.length === 0) return { deleted: true, inserted: 0 };
+-
+-  const insertResp = await fetchImpl(base, {
+-    method: "POST",
+-    headers: { ...headers, Prefer: "return=minimal" },
+-    body: JSON.stringify(rows),
+-  });
+-  if (!insertResp.ok) {
+-    throw new Error(`Supabase insert failed for field_id=${fieldId} (${insertResp.status}): ${await safeText(insertResp)}`);
+-  }
+-
+-  return { deleted: true, inserted: rows.length };
+-}
+-
+-/** Upsert one field_sync_meta row (on_conflict=field_id). */
+-async function upsertSyncMeta(env, { table, row, fetchImpl = fetch }) {
+-  assertConfigured(env);
+-  const url = `${env.SUPABASE_URL}/rest/v1/${table}?on_conflict=field_id`;
+-  const resp = await fetchImpl(url, {
+-    method: "POST",
+-    headers: { ...authHeaders(env), Prefer: "resolution=merge-duplicates,return=minimal" },
+-    body: JSON.stringify([row]),
+-  });
+-  if (!resp.ok) {
+-    throw new Error(`Supabase sync-meta upsert failed for field_id=${row.field_id} (${resp.status}): ${await safeText(resp)}`);
+-  }
+-}
+-
+-async function safeText(resp) {
+-  try {
+-    return await resp.text();
+-  } catch {
+-    return "<no body>";
+-  }
+-}
+-
+-export { replaceFieldPermitWindow, upsertSyncMeta };
+diff --git a/src/hrpt/sync.js b/src/hrpt/sync.js
+index 1a5417c..9bc745f 100644
+--- a/src/hrpt/sync.js
++++ b/src/hrpt/sync.js
+@@ -20,10 +20,10 @@
+ import { HRPT_PERMITS_URL, HRPT_FETCH_HEADERS, HRPT_SOURCE_LABEL, FIELD_PERMIT_CACHE_TABLE, FIELD_SYNC_META_TABLE } from "./config.js";
+ import { parseHrptPermitsHtml } from "./parser.js";
+ import { resolveFieldId } from "./fieldMap.js";
+-import { replaceFieldPermitWindow, upsertSyncMeta } from "./supabaseClient.js";
++import { replaceFieldPermitWindow, upsertSyncMeta } from "./d1Client.js";
+ 
+ /**
+- * @param {any} env Worker environment (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
++ * @param {any} env Worker environment (env.DB — the D1 binding configured in wrangler.jsonc)
+  * @param {{
+  *   fetchImpl?: typeof fetch,
+  *   now?: () => Date,
+@@ -120,7 +120,6 @@ async function runHrptSync(env, opts = {}) {
+         minDate: dateWindow.minDate,
+         maxDate: dateWindow.maxDate,
+         rows: fieldRows,
+-        fetchImpl,
+       });
+ 
+       await upsertSyncMeta(env, {
+@@ -131,7 +130,6 @@ async function runHrptSync(env, opts = {}) {
+           live_availability_status: "synced",
+           permit_source_url: HRPT_PERMITS_URL,
+         },
+-        fetchImpl,
+       });
+ 
+       summary.fieldsWritten += 1;
+diff --git a/src/hrpt/sync.test.js b/src/hrpt/sync.test.js
+index ffd849a..c7a23cc 100644
+--- a/src/hrpt/sync.test.js
++++ b/src/hrpt/sync.test.js
+@@ -5,43 +5,37 @@ import { fileURLToPath } from "node:url";
+ import path from "node:path";
+ import { runHrptSync } from "./sync.js";
+ import { EXACT_NAME_TO_FIELD_ID } from "./fieldMap.js";
++import { createFakeD1 } from "./__testUtils__/fakeD1.js";
+ 
+ const __dirname = path.dirname(fileURLToPath(import.meta.url));
+ const rowspanHtml = readFileSync(path.join(__dirname, "__fixtures__/rowspan-pattern.html"), "utf8");
+ 
+ const REFERENCE_DATE = new Date("2026-06-25T12:00:00Z");
+-const FAKE_ENV = { SUPABASE_URL: "https://fake.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "fake-key" };
+ 
+ function silentLog() {
+   return { info: () => {}, warn: () => {}, error: () => {} };
+ }
+ 
+-/** A fetchImpl that serves the HRPT page HTML and records/mocks Supabase REST calls. */
+-function makeMockFetch({ pageHtml = rowspanHtml, pageStatus = 200, supabaseStatus = 200 } = {}) {
++/** A fetchImpl that serves only the HRPT page HTML (D1 writes go through env.DB, not fetch, now). */
++function makePageFetch({ pageHtml = rowspanHtml, pageStatus = 200 } = {}) {
+   const calls = [];
+   const fetchImpl = async (url, init) => {
+-    if (typeof url === "string" && url.includes("hudsonriverpark.org")) {
+-      calls.push({ kind: "page-fetch", url, init });
+-      return {
+-        ok: pageStatus >= 200 && pageStatus < 300,
+-        status: pageStatus,
+-        text: async () => pageHtml,
+-      };
+-    }
+-    // Supabase REST call.
+-    calls.push({ kind: "supabase", url, init, method: init.method, body: init.body ? JSON.parse(init.body) : null });
++    calls.push({ url, init });
+     return {
+-      ok: supabaseStatus >= 200 && supabaseStatus < 300,
+-      status: supabaseStatus,
+-      text: async () => (supabaseStatus >= 200 && supabaseStatus < 300 ? "" : "mock supabase error"),
++      ok: pageStatus >= 200 && pageStatus < 300,
++      status: pageStatus,
++      text: async () => pageHtml,
+     };
+   };
+   return { fetchImpl, calls };
+ }
+ 
+ test("happy path: fetches, parses, and writes cache + sync_meta for mapped fields only", async () => {
+-  const { fetchImpl, calls } = makeMockFetch();
+-  const summary = await runHrptSync(FAKE_ENV, { fetchImpl, now: () => REFERENCE_DATE, log: silentLog() });
++  const { fetchImpl } = makePageFetch();
++  const { db, tables, calls: d1Calls } = createFakeD1();
++  const env = { DB: db };
++
++  const summary = await runHrptSync(env, { fetchImpl, now: () => REFERENCE_DATE, log: silentLog() });
+ 
+   assert.equal(summary.ok, true);
+   // Pier 25 (exact match) and Gansevoort (alias match) both resolve; the
+@@ -49,44 +43,39 @@ test("happy path: fetches, parses, and writes cache + sync_meta for mapped field
+   assert.equal(summary.fieldsWritten, 2);
+   assert.equal(summary.rowsInserted, 2); // Pier 25's two booked ranges; Gansevoort has none.
+ 
+-  const supabaseCalls = calls.filter((c) => c.kind === "supabase");
+   const pier25Id = EXACT_NAME_TO_FIELD_ID["Pier 25 Artificial Turf Field"];
+-  const pier25Deletes = supabaseCalls.filter((c) => c.method === "DELETE" && c.url.includes(`field_id=eq.${pier25Id}`));
++  const pier25Deletes = d1Calls.filter((c) => c.table === "field_permit_cache" && /^DELETE/i.test(c.sql) && c.args[0] === pier25Id);
+   assert.equal(pier25Deletes.length, 1, "expected exactly one scoped delete for Pier 25's window");
+-  assert.ok(pier25Deletes[0].url.includes("permit_date=gte.2026-06-28"));
+-  assert.ok(pier25Deletes[0].url.includes("permit_date=lte.2026-06-29"));
+-
+-  const pier25Inserts = supabaseCalls.filter((c) => c.method === "POST" && c.url.includes("/field_permit_cache"));
+-  // Only Pier 25 has an insert call: Gansevoort resolved and had its stale
+-  // window deleted (see pier25Deletes-equivalent assertion below), but with
+-  // zero booked rows there's nothing to insert, so no POST is made for it.
+-  assert.equal(pier25Inserts.length, 1);
+-  const pier25RowsSent = pier25Inserts.find((c) => c.body.some((r) => r.field_id === pier25Id));
+-  assert.equal(pier25RowsSent.body.length, 2);
+-  assert.equal(pier25RowsSent.body[0].field_id, pier25Id);
+-
+-  const syncMetaCalls = supabaseCalls.filter((c) => c.url.includes("/field_sync_meta"));
+-  assert.equal(syncMetaCalls.length, 2);
+-  assert.equal(syncMetaCalls[0].body[0].live_availability_status, "synced");
+-  assert.equal(syncMetaCalls[0].body[0].permit_source_url, "https://hudsonriverpark.org/visit/events/permits/fields/");
++  assert.equal(pier25Deletes[0].args[1], "2026-06-28");
++  assert.equal(pier25Deletes[0].args[2], "2026-06-29");
++
++  const pier25CacheRows = tables.field_permit_cache.filter((r) => r.field_id === pier25Id);
++  assert.equal(pier25CacheRows.length, 2);
++
++  assert.equal(tables.field_sync_meta.length, 2);
++  const pier25Meta = tables.field_sync_meta.find((r) => r.field_id === pier25Id);
++  assert.equal(pier25Meta.live_availability_status, "synced");
++  assert.equal(pier25Meta.permit_source_url, "https://hudsonriverpark.org/visit/events/permits/fields/");
+ });
+ 
+-test("a suspiciously short response body aborts before any Supabase write", async () => {
+-  const { fetchImpl, calls } = makeMockFetch({ pageHtml: "<html></html>" });
+-  const summary = await runHrptSync(FAKE_ENV, { fetchImpl, now: () => REFERENCE_DATE, log: silentLog() });
++test("a suspiciously short response body aborts before any D1 write", async () => {
++  const { fetchImpl } = makePageFetch({ pageHtml: "<html></html>" });
++  const { db, calls: d1Calls } = createFakeD1();
++  const summary = await runHrptSync({ DB: db }, { fetchImpl, now: () => REFERENCE_DATE, log: silentLog() });
+ 
+   assert.equal(summary.ok, false);
+   assert.match(summary.reason, /suspiciously short body/);
+-  assert.equal(calls.filter((c) => c.kind === "supabase").length, 0);
++  assert.equal(d1Calls.length, 0);
+ });
+ 
+-test("a page-fetch failure aborts before any Supabase write, leaving cache untouched", async () => {
+-  const { fetchImpl, calls } = makeMockFetch({ pageStatus: 503 });
+-  const summary = await runHrptSync(FAKE_ENV, { fetchImpl, now: () => REFERENCE_DATE, log: silentLog() });
++test("a page-fetch failure aborts before any D1 write, leaving cache untouched", async () => {
++  const { fetchImpl } = makePageFetch({ pageStatus: 503 });
++  const { db, calls: d1Calls } = createFakeD1();
++  const summary = await runHrptSync({ DB: db }, { fetchImpl, now: () => REFERENCE_DATE, log: silentLog() });
+ 
+   assert.equal(summary.ok, false);
+   assert.match(summary.reason, /HTTP 503/);
+-  assert.equal(calls.filter((c) => c.kind === "supabase").length, 0);
++  assert.equal(d1Calls.length, 0);
+ });
+ 
+ test("zero parsed field blocks aborts without writing anything (do not overwrite good cache with an empty result)", async () => {
+@@ -94,12 +83,13 @@ test("zero parsed field blocks aborts without writing anything (do not overwrite
+   // exercises the "page fetched fine but no field blocks found" path,
+   // distinct from the short-body guard covered implicitly elsewhere.
+   const notTheSchedulePage = `<html><body><!-- ${"x".repeat(250)} --><p>This is not the HRPT schedule page (e.g. a maintenance/challenge page).</p></body></html>`;
+-  const { fetchImpl, calls } = makeMockFetch({ pageHtml: notTheSchedulePage });
+-  const summary = await runHrptSync(FAKE_ENV, { fetchImpl, now: () => REFERENCE_DATE, log: silentLog() });
++  const { fetchImpl } = makePageFetch({ pageHtml: notTheSchedulePage });
++  const { db, calls: d1Calls } = createFakeD1();
++  const summary = await runHrptSync({ DB: db }, { fetchImpl, now: () => REFERENCE_DATE, log: silentLog() });
+ 
+   assert.equal(summary.ok, false);
+   assert.match(summary.reason, /zero field table blocks/);
+-  assert.equal(calls.filter((c) => c.kind === "supabase").length, 0);
++  assert.equal(d1Calls.length, 0);
+ });
+ 
+ test("an unmapped field name is skipped and logged, without blocking other fields in the same run", async () => {
+@@ -107,8 +97,9 @@ test("an unmapped field name is skipped and logged, without blocking other field
+     "Gansevoort Peninsula Athletic Field",
+     "Some Brand New Field Nobody Has Heard Of"
+   );
+-  const { fetchImpl, calls } = makeMockFetch({ pageHtml: htmlWithUnmapped });
+-  const summary = await runHrptSync(FAKE_ENV, { fetchImpl, now: () => REFERENCE_DATE, log: silentLog() });
++  const { fetchImpl } = makePageFetch({ pageHtml: htmlWithUnmapped });
++  const { db, tables } = createFakeD1();
++  const summary = await runHrptSync({ DB: db }, { fetchImpl, now: () => REFERENCE_DATE, log: silentLog() });
+ 
+   assert.equal(summary.ok, true); // Pier 25 still wrote successfully.
+   assert.equal(summary.fieldsWritten, 1);
+@@ -116,18 +107,18 @@ test("an unmapped field name is skipped and logged, without blocking other field
+   assert.ok(summary.anomalies.some((a) => a.includes("unmapped HRPT field name")));
+ 
+   const pier25Id = EXACT_NAME_TO_FIELD_ID["Pier 25 Artificial Turf Field"];
+-  const supabaseCalls = calls.filter((c) => c.kind === "supabase");
+-  assert.ok(supabaseCalls.some((c) => c.url.includes(pier25Id)));
++  assert.ok(tables.field_sync_meta.some((r) => r.field_id === pier25Id));
+ });
+ 
+-test("a Supabase write failure for one field does not stop other fields from being written", async () => {
+-  const { fetchImpl, calls } = makeMockFetch({ supabaseStatus: 500 });
+-  const summary = await runHrptSync(FAKE_ENV, { fetchImpl, now: () => REFERENCE_DATE, log: silentLog() });
++test("a D1 write failure for one field does not stop other fields from being written", async () => {
++  const { fetchImpl } = makePageFetch();
++  const { db, calls: d1Calls } = createFakeD1({ failTables: ["field_permit_cache"] });
++  const summary = await runHrptSync({ DB: db }, { fetchImpl, now: () => REFERENCE_DATE, log: silentLog() });
+ 
+   assert.equal(summary.ok, false); // nothing successfully written this run
+   assert.equal(summary.fieldsWritten, 0);
+   assert.ok(summary.anomalies.some((a) => a.includes("write failed")));
+   // Both mapped fields were still attempted (not aborted after the first failure).
+-  const supabaseCalls = calls.filter((c) => c.kind === "supabase");
+-  assert.ok(supabaseCalls.length >= 2);
++  const deleteCalls = d1Calls.filter((c) => /^DELETE/i.test(c.sql));
++  assert.ok(deleteCalls.length >= 2);
+ });
+diff --git a/wrangler.jsonc b/wrangler.jsonc
+index e294ca0..82a03bf 100644
+--- a/wrangler.jsonc
++++ b/wrangler.jsonc
+@@ -23,13 +23,35 @@
+   "triggers": {
+     "crons": ["0 */3 * * *"]
+   },
+-  // Non-secret config the sync jobs read via `env`. The write path also
+-  // requires a Supabase SERVICE ROLE key, which must be set as a Wrangler
+-  // secret (never committed): `wrangler secret put SUPABASE_SERVICE_ROLE_KEY`.
+-  // SUPABASE_URL below matches the project the frontend already reads from
+-  // (see SUPABASE_URL in public/TrueSpordo.html) — the anon key used there
+-  // is read-only by RLS design and must not be reused for server-side writes.
+-  "vars": {
+-    "SUPABASE_URL": "https://avwvtjsabmhqqeosqubw.supabase.co"
+-  }
++  // D1 binding for the HRPT permit-sync pipeline (src/hrpt/d1Client.js,
++  // src/hrpt/sync.js). D1 is reached at runtime via this binding
++  // (env.DB.prepare(...).bind(...).run()/.batch()) — there's no URL or API
++  // secret to configure here (unlike the Supabase REST client this
++  // replaced); access is controlled entirely by this binding existing in
++  // the Worker's deployment.
++  //
++  // NOTE: `database_id` below is a placeholder. This sandbox has no real
++  // Cloudflare account access, so the database has not been provisioned
++  // yet. Whoever has real Cloudflare access needs to, once:
++  //   1. Create the database:
++  //        wrangler d1 create spordo-hrpt
++  //      This prints a `database_id` (a UUID) — paste it in below,
++  //      replacing "REPLACE_WITH_REAL_DATABASE_ID".
++  //   2. Apply the schema migration (migrations/0001_init.sql):
++  //        wrangler d1 migrations apply spordo-hrpt --remote
++  //      (add/also run with `--local` for local `wrangler dev` testing)
++  //   3. Redeploy so the binding takes effect: `wrangler deploy`
++  //
++  // Scoped only to the HRPT sync pipeline right now — this does NOT touch
++  // the Supabase project the frontend (public/TrueSpordo.html) still uses
++  // for auth and the DPR/NYC-Parks permit reads; that migration is
++  // deliberately separate and hasn't happened here.
++  "d1_databases": [
++    {
++      "binding": "DB",
++      "database_name": "spordo-hrpt",
++      "database_id": "REPLACE_WITH_REAL_DATABASE_ID",
++      "migrations_dir": "migrations"
++    }
++  ]
+ }
+-- 
+2.43.0
+
+
+From c23de6d87938cdc2ec5812d6986cc1b61738e07e Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 8 Jul 2026 21:10:48 +0000
+Subject: [PATCH 2/2] Wire real spordo-hrpt D1 database_id into wrangler.jsonc
+
+Replaces the REPLACE_WITH_REAL_DATABASE_ID placeholder now that the
+database has been provisioned and migrations/0001_init.sql applied.
+---
+ wrangler.jsonc | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/wrangler.jsonc b/wrangler.jsonc
+index 82a03bf..3576b19 100644
+--- a/wrangler.jsonc
++++ b/wrangler.jsonc
+@@ -50,7 +50,7 @@
+     {
+       "binding": "DB",
+       "database_name": "spordo-hrpt",
+-      "database_id": "REPLACE_WITH_REAL_DATABASE_ID",
++      "database_id": "af3f5a92-9c55-4195-915c-22f0a0746d34",
+       "migrations_dir": "migrations"
+     }
+   ]
+-- 
+2.43.0
+

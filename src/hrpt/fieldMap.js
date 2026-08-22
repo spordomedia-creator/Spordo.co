@@ -72,9 +72,9 @@ const ALIASES = [
     note: "Live page name has a 'Youth' qualifier our DB name lacks. Assumed same physical field. NOT verified — could plausibly be a distinct youth-only sub-booking of Pier 40 Indoor Field.",
   },
   {
-    pageName: "Pier 40 Rooftop Field #2 (Youth Only)",
+    pageName: "Pier 40 Rooftop Field #2 – Youth Only",
     fieldId: EXACT_NAME_TO_FIELD_ID["Pier 40 Rooftop Field #2"],
-    note: "Live page name has a '(Youth Only)' qualifier our DB name lacks. Assumed same physical field as Rooftop Field #2.",
+    note: "Confirmed live (2026-08-22): the page uses an en-dash (‘– Youth Only’), not the parenthetical this alias previously assumed.",
   },
   {
     pageName: "Gansevoort Peninsula Athletic Field",

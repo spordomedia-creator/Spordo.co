@@ -1,0 +1,339 @@
+From d9a5127a708fe79d580add4fc94c76e5a247f45f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 10 Jul 2026 15:33:52 +0000
+Subject: [PATCH] Wire real HRPT permit data into the field-detail page
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The page was showing a static "Spordo does not have access to their
+live availability data" card for every HRPT field, even though the
+data has existed in D1 since the earlier port. The actual display
+logic (loadPermitInfoCard, fetchPermitMeta/fetchCachedPermits) already
+existed but was dead code: never called, and pointed at Supabase
+tables that were never populated for HRPT.
+
+- Add GET /api/permits/:fieldId (src/permitsApi.js), reading D1
+  server-side (browsers can't reach D1 directly the way they could
+  Supabase's public REST API).
+- Repoint the frontend fetchers at that route instead of Supabase.
+- Fix loadPermitInfoCard's availability check, which unconditionally
+  treated every HRPT/external field as "unavailable" regardless of
+  whether real synced data existed for it — a leftover assumption
+  from before the scraper was built.
+- Actually call loadPermitInfoCard from renderSchdBody's external-field
+  branch, and fix a copy bug (f.org, never set anywhere) that showed
+  a blank space in the card.
+- Fix package.json's test glob: node --test src/**/*.test.js was
+  unquoted, so bash (globstar off) expanded ** as a single directory
+  level, silently skipping any test file placed directly in src/ (as
+  opposed to src/hrpt/*). Quoting it lets Node's own glob handle **
+  correctly.
+---
+ package.json           |  2 +-
+ public/TrueSpordo.html | 53 +++++++++--------------
+ src/index.js           |  9 ++++
+ src/permitsApi.js      | 63 +++++++++++++++++++++++++++
+ src/permitsApi.test.js | 97 ++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 190 insertions(+), 34 deletions(-)
+ create mode 100644 src/permitsApi.js
+ create mode 100644 src/permitsApi.test.js
+
+diff --git a/package.json b/package.json
+index 2fcff7f..6ce218c 100644
+--- a/package.json
++++ b/package.json
+@@ -9,7 +9,7 @@
+     "start": "wrangler dev",
+     "deploy": "wrangler deploy",
+     "tail": "wrangler tail",
+-    "test": "node --test src/**/*.test.js"
++    "test": "node --test \"src/**/*.test.js\""
+   },
+   "devDependencies": {
+     "wrangler": "^4.20.0"
+diff --git a/public/TrueSpordo.html b/public/TrueSpordo.html
+index 2b8b517..8e60f80 100644
+--- a/public/TrueSpordo.html
++++ b/public/TrueSpordo.html
+@@ -5024,9 +5024,11 @@ function renderSchdBody() {
+     el.innerHTML = `
+       <div class="schd-ext-card">
+         <div style="margin-bottom:12px"><span class="source-badge">${esc(f.orgShort)}</span></div>
+-        <div class="ext-note" style="margin-bottom:20px">This field is managed by <strong>${esc(f.org)}</strong>, which operates its own independent permit system outside NYC Parks. Spordo does not have access to their live availability data.</div>
++        <div class="ext-note" style="margin-bottom:20px">This field is managed by <strong>${esc(f.operator)}</strong>, which operates its own independent permit system outside NYC Parks.</div>
+         <a class="ext-book-btn" href="${esc(f.bookingUrl)}" target="_blank" rel="noopener">Book at ${esc(f.orgShort)} →</a>
++        <div id="ext-permit-info" style="margin-top:20px"></div>
+       </div>`;
++    loadPermitInfoCard(f, document.getElementById('ext-permit-info'));
+     return;
+   }
+ 
+@@ -5835,34 +5837,17 @@ async function initSupabase() {
+ 
+ /* ── PERMIT INFO ─────────────────────────────────── */
+ 
+-// Fetch sync meta for a field from Supabase (public read, no auth needed)
+-async function fetchPermitMeta(fieldId) {
++// Fetch sync meta + upcoming cached permits for a field from our own
++// same-origin /api/permits/:fieldId endpoint (src/permitsApi.js), which
++// reads Cloudflare D1 server-side. One request returns both together.
++async function fetchPermitsPayload(fieldId) {
+   try {
+-    const { data, error } = await _sb
+-      .from('field_sync_meta')
+-      .select('*')
+-      .eq('field_id', fieldId)
+-      .maybeSingle();
+-    if (error) return null;
+-    return data;
+-  } catch(e) { return null; }
+-}
+-
+-// Fetch upcoming cached permits for a field
+-async function fetchCachedPermits(fieldId) {
+-  try {
+-    const today = new Date().toISOString().split('T')[0];
+-    const { data, error } = await _sb
+-      .from('field_permit_cache')
+-      .select('permit_date,start_time,end_time,event_name')
+-      .eq('field_id', fieldId)
+-      .gte('permit_date', today)
+-      .order('permit_date', { ascending: true })
+-      .order('start_time',  { ascending: true })
+-      .limit(10);
+-    if (error) return [];
+-    return data || [];
+-  } catch(e) { return []; }
++    const r = await fetch(`/api/permits/${encodeURIComponent(fieldId)}`);
++    if (!r.ok) return { meta: null, permits: [] };
++    return await r.json();
++  } catch(e) {
++    return { meta: null, permits: [] };
++  }
+ }
+ 
+ function _fmtSyncDate(iso) {
+@@ -5894,13 +5879,15 @@ async function loadPermitInfoCard(field, containerEl) {
+     <div class="permit-info-row" style="color:var(--c-w30)">Loading…</div>
+   </div>`;
+ 
+-  const [meta, cachedPermits] = await Promise.all([
+-    fetchPermitMeta(field.id),
+-    fetchCachedPermits(field.id)
+-  ]);
++  const { meta, permits: cachedPermits } = await fetchPermitsPayload(field.id);
+ 
+   const isHRPT    = field.external || (field.operator || '').includes('Hudson River');
+-  const unavail   = isHRPT || meta?.live_availability_status === 'not_publicly_available';
++  // A field only counts as "unavailable" when we genuinely have no synced
++  // data for it yet (no meta row at all) or the sync explicitly flagged it
++  // as not publicly published — NOT just because it's an HRPT/external
++  // field. HRPT's schedule is scraped into D1 now (src/hrpt/), so treating
++  // every HRPT field as blanket-unavailable would hide real synced data.
++  const unavail   = !meta || meta?.live_availability_status === 'not_publicly_available';
+   const stale     = !unavail && _isStale(meta?.last_permit_sync_at);
+   const syncDate  = _fmtSyncDate(meta?.last_permit_sync_at);
+   const sourceUrl = meta?.permit_source_url
+diff --git a/src/index.js b/src/index.js
+index e5462fc..a4fdd90 100644
+--- a/src/index.js
++++ b/src/index.js
+@@ -7,6 +7,9 @@
+  * us route "/" to the main app without renaming the source file.
+  */
+ import { runHrptSync } from "./hrpt/sync.js";
++import { handlePermitsRequest } from "./permitsApi.js";
++
++const PERMITS_API_PREFIX = "/api/permits/";
+ 
+ export default {
+   async fetch(request, env) {
+@@ -18,6 +21,12 @@ export default {
+       return env.ASSETS.fetch(new Request(url, request));
+     }
+ 
++    // Cached-permit read API for the field-detail page (see permitsApi.js).
++    if (url.pathname.startsWith(PERMITS_API_PREFIX)) {
++      const fieldId = decodeURIComponent(url.pathname.slice(PERMITS_API_PREFIX.length));
++      return handlePermitsRequest(env, fieldId);
++    }
++
+     // Everything else falls through to the static-asset runtime.
+     return env.ASSETS.fetch(request);
+   },
+diff --git a/src/permitsApi.js b/src/permitsApi.js
+new file mode 100644
+index 0000000..c0551ba
+--- /dev/null
++++ b/src/permitsApi.js
+@@ -0,0 +1,63 @@
++/**
++ * GET /api/permits/:fieldId — serves cached permit data from D1 to the
++ * frontend. Currently only ever has real rows for HRPT fields (the only
++ * source synced into D1 so far — see CLAUDE.md's storage-split note); an
++ * unrecognized or not-yet-synced field_id just comes back with meta: null
++ * and permits: [], which the frontend already treats as "not available"
++ * rather than an error.
++ */
++
++const PERMIT_HORIZON_DAYS = 14;
++const MAX_PERMITS_RETURNED = 50;
++
++async function handlePermitsRequest(env, fieldId) {
++  if (!env.DB) {
++    return jsonResponse({ error: "DB (D1 binding) is not configured" }, 500);
++  }
++  if (!fieldId) {
++    return jsonResponse({ error: "missing field id" }, 400);
++  }
++
++  const today = new Date();
++  const todayStr = today.toISOString().split("T")[0];
++  const horizon = new Date(today.getTime() + PERMIT_HORIZON_DAYS * 86400000);
++  const horizonStr = horizon.toISOString().split("T")[0];
++
++  const [metaResult, permitsResult] = await Promise.all([
++    env.DB.prepare(
++      `SELECT field_id, last_permit_sync_at, live_availability_status, permit_source_url
++       FROM field_sync_meta WHERE field_id = ?`
++    )
++      .bind(fieldId)
++      .first(),
++    env.DB.prepare(
++      `SELECT permit_date, start_time, end_time, event_name
++       FROM field_permit_cache
++       WHERE field_id = ? AND permit_date >= ? AND permit_date <= ?
++       ORDER BY permit_date ASC, start_time ASC
++       LIMIT ?`
++    )
++      .bind(fieldId, todayStr, horizonStr, MAX_PERMITS_RETURNED)
++      .all(),
++  ]);
++
++  return jsonResponse({
++    meta: metaResult || null,
++    permits: permitsResult?.results || [],
++  });
++}
++
++function jsonResponse(body, status = 200) {
++  return new Response(JSON.stringify(body), {
++    status,
++    headers: {
++      "Content-Type": "application/json",
++      // Cache is already refreshed server-side every 3h (see wrangler.jsonc
++      // triggers.crons) — a short client-side cache keeps repeat page loads
++      // cheap without serving noticeably stale data.
++      "Cache-Control": "public, max-age=300",
++    },
++  });
++}
++
++export { handlePermitsRequest, PERMIT_HORIZON_DAYS };
+diff --git a/src/permitsApi.test.js b/src/permitsApi.test.js
+new file mode 100644
+index 0000000..7716c84
+--- /dev/null
++++ b/src/permitsApi.test.js
+@@ -0,0 +1,97 @@
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import { handlePermitsRequest } from "./permitsApi.js";
++
++/**
++ * A minimal read-only D1 fake (SELECT-only) — deliberately separate from
++ * src/hrpt/__testUtils__/fakeD1.js, which only recognizes the write-side
++ * statement shapes d1Client.js issues and doesn't model SELECT at all.
++ */
++function createFakeReadD1({ syncMeta = {}, permitCache = [] } = {}) {
++  const calls = [];
++  const db = {
++    prepare(sql) {
++      let boundArgs = [];
++      return {
++        bind(...args) {
++          boundArgs = args;
++          return this;
++        },
++        async first() {
++          calls.push({ sql, args: boundArgs, method: "first" });
++          const [fieldId] = boundArgs;
++          return syncMeta[fieldId] || null;
++        },
++        async all() {
++          calls.push({ sql, args: boundArgs, method: "all" });
++          const [fieldId, minDate, maxDate] = boundArgs;
++          const results = (permitCache[fieldId] || []).filter(
++            (r) => r.permit_date >= minDate && r.permit_date <= maxDate
++          );
++          return { results };
++        },
++      };
++    },
++  };
++  return { db, calls };
++}
++
++test("returns 500 when D1 binding is missing", async () => {
++  const resp = await handlePermitsRequest({}, "some-field");
++  assert.equal(resp.status, 500);
++  const body = await resp.json();
++  assert.match(body.error, /DB.*not configured/);
++});
++
++test("returns 400 when fieldId is missing/empty", async () => {
++  const { db } = createFakeReadD1();
++  const resp = await handlePermitsRequest({ DB: db }, "");
++  assert.equal(resp.status, 400);
++});
++
++test("returns meta + permits for a field with real synced data", async () => {
++  const { db } = createFakeReadD1({
++    syncMeta: {
++      "field-1": {
++        field_id: "field-1",
++        last_permit_sync_at: "2026-07-09T15:00:37.709Z",
++        live_availability_status: "synced",
++        permit_source_url: "https://hudsonriverpark.org/visit/events/permits/fields/",
++      },
++    },
++    permitCache: {
++      "field-1": [
++        { permit_date: "2026-07-10", start_time: "18:00", end_time: "20:00", event_name: "League A" },
++        { permit_date: "2026-07-25", start_time: "09:00", end_time: "10:00", event_name: "Too far out" },
++      ],
++    },
++  });
++
++  const resp = await handlePermitsRequest({ DB: db }, "field-1");
++  assert.equal(resp.status, 200);
++  assert.equal(resp.headers.get("Content-Type"), "application/json");
++  const body = await resp.json();
++  assert.equal(body.meta.live_availability_status, "synced");
++  // The 2026-07-25 row is outside the 14-day horizon and must be excluded.
++  assert.equal(body.permits.length, 1);
++  assert.equal(body.permits[0].event_name, "League A");
++});
++
++test("returns meta: null and permits: [] for an unknown/not-yet-synced field, not an error", async () => {
++  const { db } = createFakeReadD1();
++  const resp = await handlePermitsRequest({ DB: db }, "never-synced-field");
++  assert.equal(resp.status, 200);
++  const body = await resp.json();
++  assert.equal(body.meta, null);
++  assert.deepEqual(body.permits, []);
++});
++
++test("URL-encoded field ids (containing base64 special chars) are queried as-is once decoded by the caller", async () => {
++  const { db, calls } = createFakeReadD1({
++    syncMeta: { "SFJQfFBpZXI=": { field_id: "SFJQfFBpZXI=", last_permit_sync_at: "now", live_availability_status: "synced" } },
++  });
++  const resp = await handlePermitsRequest({ DB: db }, "SFJQfFBpZXI=");
++  assert.equal(resp.status, 200);
++  const metaCall = calls.find((c) => c.method === "first");
++  assert.equal(metaCall.args[0], "SFJQfFBpZXI=");
++});
+-- 
+2.43.0
+

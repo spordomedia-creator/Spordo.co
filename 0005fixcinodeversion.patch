@@ -1,0 +1,36 @@
+From c5c70d527da9044e2724c15ebd38625079ab42bd Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 10 Jul 2026 14:16:58 +0000
+Subject: [PATCH] Fix CI deploy: bump workflow Node to 22 (wrangler 4.x
+ requires it)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The workflow pinned Node 20, but package.json's wrangler ^4.20.0 needs
+Node >=22. On Node 20, cloudflare/wrangler-action's own compatibility
+fallback silently installed wrangler 3.90.0 instead, which fails to
+read wrangler.jsonc's `main` field ("Missing entry-point"). This broke
+the first real CI deploy since the repo was scaffolded, unrelated to
+the HRPT/D1 work — the live Worker itself was unaffected since it was
+already deployed manually with a properly-versioned local wrangler.
+---
+ .github/workflows/deploy.yml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/.github/workflows/deploy.yml b/.github/workflows/deploy.yml
+index e7eb0e7..3863ba6 100644
+--- a/.github/workflows/deploy.yml
++++ b/.github/workflows/deploy.yml
+@@ -22,7 +22,7 @@ jobs:
+       - name: Setup Node.js
+         uses: actions/setup-node@v4
+         with:
+-          node-version: 20
++          node-version: 22
+ 
+       - name: Install dependencies
+         run: npm install
+-- 
+2.43.0
+

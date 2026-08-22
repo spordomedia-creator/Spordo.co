@@ -1,0 +1,188 @@
+From 7b23f8c33831fc6e049817581b0e74ef2341c7c1 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 10 Jul 2026 21:45:52 +0000
+Subject: [PATCH] Stop dangling bare-time cell text from becoming a fake
+ event_name
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+emitRun()'s fallback path used a booked cell's raw text verbatim as
+event_name whenever parseExplicitRangeLabel() couldn't match a full
+"start–end" range in it. For cells whose only content is a dangling
+start time (e.g. "9:00 AM–", seen in production), this stored the
+fragment as-is -- the row position already gives us that same start
+time, so it added no information and just looked broken in the UI.
+
+Adds isBareTimeFragment() (dateTime.js) to recognize this shape and
+suppress it (event_name stays null) without affecting genuine labels,
+including ones that happen to start with a time (e.g. "9:00 AM
+Practice" is still kept). Not logged as an anomaly -- this is an
+expected, routine shape, not a fault.
+
+Scoped to the parser only, matching the decision to fix the root
+cause (future syncs won't write this fragment again) rather than also
+adding an equivalent frontend-side check -- already-cached bad rows
+clear on the next scheduled sync (up to ~3h) rather than immediately.
+---
+ src/hrpt/dateTime.js      | 18 ++++++++++++++++
+ src/hrpt/dateTime.test.js | 20 ++++++++++++++++++
+ src/hrpt/parser.js        |  9 +++++++-
+ src/hrpt/parser.test.js   | 44 +++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 90 insertions(+), 1 deletion(-)
+
+diff --git a/src/hrpt/dateTime.js b/src/hrpt/dateTime.js
+index c1335ec..f8827ce 100644
+--- a/src/hrpt/dateTime.js
++++ b/src/hrpt/dateTime.js
+@@ -156,6 +156,23 @@ function parseExplicitRangeLabel(text) {
+   return { startMinutes, endMinutes, remainder };
+ }
+ 
++/**
++ * True when `text` is nothing but a bare time (optionally with AM/PM,
++ * optionally followed by a trailing dash) and carries no other content —
++ * e.g. "9:00 AM–", "8:30 AM", "7:00–". These show up as a booked cell's own
++ * text when the page renders just a start-time label inside the colored
++ * block rather than a full "start–end" range parseExplicitRangeLabel can
++ * match; the row position already gives us that same start time, so using
++ * this verbatim as an event name would just echo it back as a dangling
++ * fragment. A genuine label that happens to start with a time (e.g. "9:00
++ * AM Practice") has trailing content after the optional dash and does not
++ * match.
++ */
++function isBareTimeFragment(text) {
++  const re = /^\s*\d{1,2}(?::\d{2})?\s*(?:[AaPp][Mm])?\s*[–—-]?\s*$/;
++  return !!text && re.test(text);
++}
++
+ /** Compute the modal/minimum positive gap between sorted row start times. */
+ function inferSlotIntervalMinutes(sortedMinutes) {
+   const diffs = [];
+@@ -173,5 +190,6 @@ export {
+   parseTimeLabel,
+   formatTime,
+   parseExplicitRangeLabel,
++  isBareTimeFragment,
+   inferSlotIntervalMinutes,
+ };
+diff --git a/src/hrpt/dateTime.test.js b/src/hrpt/dateTime.test.js
+index d5327b4..ec1a6ea 100644
+--- a/src/hrpt/dateTime.test.js
++++ b/src/hrpt/dateTime.test.js
+@@ -6,6 +6,7 @@ import {
+   parseTimeLabel,
+   formatTime,
+   parseExplicitRangeLabel,
++  isBareTimeFragment,
+   inferSlotIntervalMinutes,
+ } from "./dateTime.js";
+ 
+@@ -64,6 +65,25 @@ test("parseExplicitRangeLabel returns null for non-range text", () => {
+   assert.equal(parseExplicitRangeLabel(""), null);
+ });
+ 
++test("isBareTimeFragment recognizes a dangling time with nothing else as text", () => {
++  assert.equal(isBareTimeFragment("9:00 AM–"), true);
++  assert.equal(isBareTimeFragment("8:30 AM–"), true);
++  assert.equal(isBareTimeFragment("7:00 PM–"), true);
++  assert.equal(isBareTimeFragment("2:00 PM–"), true);
++  assert.equal(isBareTimeFragment("9:00–"), true); // no AM/PM
++  assert.equal(isBareTimeFragment("9:00 AM"), true); // no trailing dash
++  assert.equal(isBareTimeFragment("9:00 AM—"), true); // em dash variant
++});
++
++test("isBareTimeFragment does not suppress real labels, even ones starting with a time", () => {
++  assert.equal(isBareTimeFragment("Private Event"), false);
++  assert.equal(isBareTimeFragment("Soccer - Non Regulation"), false);
++  assert.equal(isBareTimeFragment("9:00 AM Practice"), false);
++  assert.equal(isBareTimeFragment("10:00 AM–11:00 AM"), false); // a genuine full range
++  assert.equal(isBareTimeFragment(""), false);
++  assert.equal(isBareTimeFragment(null), false);
++});
++
+ test("inferSlotIntervalMinutes finds the minimum positive gap", () => {
+   assert.equal(inferSlotIntervalMinutes([540, 570, 600, 630]), 30);
+   assert.equal(inferSlotIntervalMinutes([540]), null);
+diff --git a/src/hrpt/parser.js b/src/hrpt/parser.js
+index 80881de..b435d29 100644
+--- a/src/hrpt/parser.js
++++ b/src/hrpt/parser.js
+@@ -23,6 +23,7 @@ import {
+   parseTimeLabel,
+   formatTime,
+   parseExplicitRangeLabel,
++  isBareTimeFragment,
+   inferSlotIntervalMinutes,
+ } from "./dateTime.js";
+ 
+@@ -192,7 +193,13 @@ function emitRun({ fieldNameOnPage, date, grid, col, startRow, endRowExclusive,
+           endMinutes
+         )}); used row-derived bounds instead`
+       );
+-    } else if (!eventName) {
++    } else if (!eventName && !isBareTimeFragment(text)) {
++      // A cell whose only text is a bare time (e.g. "9:00 AM–") isn't a
++      // real event label — it's just the block's own start time echoed
++      // back, conveying nothing the row position doesn't already give us.
++      // Leaving eventName null here (not logged as an anomaly: this is a
++      // routine, expected shape, not a fault) lets it fall through to the
++      // `event_name: eventName || null` default below.
+       eventName = text;
+     }
+     break;
+diff --git a/src/hrpt/parser.test.js b/src/hrpt/parser.test.js
+index f2422ee..ed30cd7 100644
+--- a/src/hrpt/parser.test.js
++++ b/src/hrpt/parser.test.js
+@@ -58,3 +58,47 @@ test("a block with no discoverable heading is skipped, not guessed, and logged a
+   assert.equal(fieldsFound.some((f) => f.fieldNameOnPage === null), false);
+   assert.ok(anomalies.some((a) => a.includes("mystery") && a.includes("no heading")));
+ });
++
++test("a booked cell whose only text is a dangling bare time (no matching end) does not become event_name", () => {
++  const html = `
++    <html><body>
++      <h1>Field Permit Schedule: June 28 &ndash; July 5, 2026</h1>
++      <div id="testfield">
++        <h3>Test Field</h3>
++        <table>
++          <tbody>
++            <tr><td></td><td>Jun 28</td></tr>
++            <tr><td>9:00 AM</td><td class="permitted">9:00 AM&ndash;</td></tr>
++            <tr><td>9:30 AM</td><td></td></tr>
++          </tbody>
++        </table>
++      </div>
++    </body></html>`;
++  const { rows } = parseHrptPermitsHtml(html, { referenceDate: REFERENCE_DATE });
++  assert.equal(rows.length, 1);
++  assert.equal(rows[0].start_time, "09:00:00");
++  assert.equal(rows[0].end_time, "09:30:00");
++  // The raw cell text ("9:00 AM–") merely echoes the row's own start time
++  // and isn't a real label — must NOT be stored verbatim.
++  assert.equal(rows[0].event_name, null);
++});
++
++test("a real label that happens to start with a time is still used as event_name", () => {
++  const html = `
++    <html><body>
++      <h1>Field Permit Schedule: June 28 &ndash; July 5, 2026</h1>
++      <div id="testfield">
++        <h3>Test Field</h3>
++        <table>
++          <tbody>
++            <tr><td></td><td>Jun 28</td></tr>
++            <tr><td>9:00 AM</td><td class="permitted">9:00 AM Practice</td></tr>
++            <tr><td>9:30 AM</td><td></td></tr>
++          </tbody>
++        </table>
++      </div>
++    </body></html>`;
++  const { rows } = parseHrptPermitsHtml(html, { referenceDate: REFERENCE_DATE });
++  assert.equal(rows.length, 1);
++  assert.equal(rows[0].event_name, "9:00 AM Practice");
++});
+-- 
+2.43.0
+
