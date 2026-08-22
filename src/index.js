@@ -8,8 +8,11 @@
  */
 import { runHrptSync } from "./hrpt/sync.js";
 import { handlePermitsRequest } from "./permitsApi.js";
+import { runSocrataSync } from "./socrata/sync.js";
+import { handleSocrataPermitsRequest } from "./socrataPermitsApi.js";
 
 const PERMITS_API_PREFIX = "/api/permits/";
+const SOCRATA_PERMITS_API_PATH = "/api/permits";
 
 export default {
   async fetch(request, env) {
@@ -25,6 +28,16 @@ export default {
     if (url.pathname.startsWith(PERMITS_API_PREFIX)) {
       const fieldId = decodeURIComponent(url.pathname.slice(PERMITS_API_PREFIX.length));
       return handlePermitsRequest(env, fieldId);
+    }
+
+    // Cached-permit read API for the field-list view (see
+    // socrataPermitsApi.js). Distinct from PERMITS_API_PREFIX above: this is
+    // an exact-path + query-string route (?sport=<id>), not a path param,
+    // and reads Socrata-sourced rows from Supabase instead of HRPT rows
+    // from D1 — see src/socrata/ and CLAUDE.md's storage-split note.
+    if (url.pathname === SOCRATA_PERMITS_API_PATH) {
+      const sport = url.searchParams.get("sport");
+      return handleSocrataPermitsRequest(env, { sport });
     }
 
     // Everything else falls through to the static-asset runtime first (real
@@ -43,11 +56,11 @@ export default {
   },
 
   // Cron Trigger entrypoint (see wrangler.jsonc `triggers.crons`). Each
-  // scheduled invocation runs every registered sync job; today that's just
-  // HRPT. The NYC Open Data / Socrata sync (tvpp-9vvx) is a separate,
-  // not-yet-built job that will get its own module under src/ and its own
-  // call here — the two sources are intentionally decoupled since HRPT
-  // doesn't publish to Open Data.
+  // scheduled invocation runs every registered sync job: HRPT (-> D1) and
+  // Socrata (-> Supabase). The two sources are intentionally decoupled
+  // (separate fetch targets, separate storage backends — see CLAUDE.md's
+  // "Storage is split" note) and run independently so a failure/slowdown
+  // in one never blocks or delays the other.
   async scheduled(event, env, ctx) {
     ctx.waitUntil(
       runHrptSync(env).then((summary) => {
@@ -55,6 +68,15 @@ export default {
           console.error("[scheduled] HRPT sync did not complete successfully:", summary.reason, summary);
         } else {
           console.log("[scheduled] HRPT sync complete:", summary);
+        }
+      })
+    );
+    ctx.waitUntil(
+      runSocrataSync(env).then((summary) => {
+        if (!summary.ok) {
+          console.error("[scheduled] Socrata sync did not complete successfully:", summary.reason, summary);
+        } else {
+          console.log("[scheduled] Socrata sync complete:", summary);
         }
       })
     );

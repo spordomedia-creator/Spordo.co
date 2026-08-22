@@ -7,6 +7,20 @@
   "observability": {
     "enabled": true
   },
+  // Non-secret config. SUPABASE_URL is the same project URL already public
+  // in public/TrueSpordo.html's SUPABASE_URL constant -- not sensitive, so
+  // it's a plain var here rather than a Wrangler secret. The Socrata sync
+  // (src/socrata/) and its read API (src/socrataPermitsApi.js) also need
+  // two SECRETS that are NOT set here (set via `wrangler secret put` /
+  // .dev.vars — see .dev.vars.example):
+  //   SUPABASE_SERVICE_ROLE_KEY — required; write+read access to
+  //     field_permit_cache/field_sync_meta bypasses RLS. Never the anon key.
+  //   SOCRATA_APP_TOKEN — recommended; raises Socrata's per-IP rate limit.
+  //     The sync still runs without it (logs a warning) but shares the
+  //     low anonymous-request limit.
+  "vars": {
+    "SUPABASE_URL": "https://avwvtjsabmhqqeosqubw.supabase.co"
+  },
   // Static assets (the HTML app) are served from ./public.
   // The ASSETS binding lets src/index.js fetch them.
   "assets": {

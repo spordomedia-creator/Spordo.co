@@ -8,5 +8,25 @@
 # `DB` binding; run `wrangler d1 migrations apply spordo-hrpt --local` once
 # to apply migrations/0001_init.sql to it.
 #
-# (No vars currently required here. This file is kept as the place to add
-# any future local-dev secrets.)
+
+# The Socrata (tvpp-9vvx) sync's storage backend is Supabase (NOT D1 — see
+# CLAUDE.md's "Storage is split" section), reached over PostgREST via plain
+# `fetch` (src/socrata/supabaseClient.js, src/socrataPermitsApi.js). Copy
+# this file to .dev.vars and fill in real values for local `wrangler dev` /
+# `wrangler dev --test-scheduled`. Never commit the real values.
+
+# Required. Service-role key for the Supabase project at SUPABASE_URL (see
+# the "vars" block in wrangler.jsonc for the URL, which is not secret).
+# Get it from Supabase dashboard -> Project Settings -> API -> service_role
+# secret. This bypasses Row Level Security -- it must NEVER be used in
+# client code (public/TrueSpordo.html uses the separate, public anon key
+# only) and must NEVER be committed.
+SUPABASE_SERVICE_ROLE_KEY=
+
+# Recommended, not strictly required. A Socrata app token raises the
+# per-IP/per-token rate limit well above the shared anonymous limit.
+# Register one at https://data.cityofnewyork.us/profile/app_tokens (free,
+# requires a Socrata/NYC Open Data account) and paste it here. The sync
+# still runs without this set (src/socrata/fetchSocrata.js logs a warning
+# and proceeds anonymously) -- but expect 429s under any real load without it.
+SOCRATA_APP_TOKEN=

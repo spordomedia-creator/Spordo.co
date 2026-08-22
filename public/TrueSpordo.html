@@ -3605,7 +3605,16 @@ footer { padding-bottom: calc(36px + var(--sab)); }
 ════════════════════════════════════════════════ -->
 <script>
 /* ── CONFIG ─────────────────────────────────── */
-const API = 'https://data.cityofnewyork.us/resource/tvpp-9vvx.json';
+// Same-origin cached-permit API (src/socrataPermitsApi.js), backed by a
+// server-side Cloudflare Cron sync of NYC Open Data / Socrata (tvpp-9vvx)
+// into Supabase (src/socrata/sync.js) -- the browser no longer calls
+// Socrata directly (no app token, no pagination, and it doesn't cache --
+// see CLAUDE.md's "Cache external data, don't hammer it live" convention).
+// Returns the same permit-object shape (event_location, event_borough,
+// start_date_time, end_date_time, event_name, event_type,
+// permit_holder_name, organization) the old direct Socrata fetch did, so
+// groupByField()/mergeExternalFields() etc. below are unchanged.
+const PERMITS_API = '/api/permits';
 
 const SPORTS = [
   { id:'soccer',     name:'Soccer',     icon:'⚽', accent:'#62b4cf', glow:'rgba(98,180,207,0.15)', border:'rgba(98,180,207,0.4)', shadow:'rgba(98,180,207,0.15)', query:'soccer'     },
@@ -4438,16 +4447,19 @@ function renderSportGrid() {
 }
 
 async function loadCounts() {
-  const t = today(), e = daysFrom(7);
+  // Counts "this week" (7 days) from the same cached permit endpoint
+  // loadFields() uses (90-day window) -- filtered client-side to 7 days
+  // rather than added as a separate server-side count query, since the
+  // sync already caches the full window and this keeps the read API
+  // surface to the one route.
+  const e = daysFrom(7);
   for (const sp of SPORTS) {
     try {
-      const sportUpper = sp.query.toUpperCase();
-      const where = encodeURIComponent(`start_date_time>='${t}T00:00:00.000' AND start_date_time<='${e}T23:59:59.000' AND upper(event_name) like '%${sportUpper}%'`);
-      const url = `${API}?$select=count(*) as n&$where=${where}`;
+      const url = `${PERMITS_API}?sport=${encodeURIComponent(sp.id)}`;
       const r = await fetch(url);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const d = await r.json();
-      const n = parseInt((d[0]||{}).n||0,10);
+      const permits = await r.json();
+      const n = permits.filter(p => permitDate(p) && permitDate(p) <= e).length;
       const el = document.getElementById(`smeta-${sp.id}`);
       if (el) el.textContent = n ? `${n} permit${n!==1?'s':''} this week` : 'View all fields →';
     } catch {
@@ -4570,12 +4582,13 @@ async function loadFields() {
   if (listEl)  listEl.innerHTML = '';
 
   try {
-    const t = today(), e = daysFrom(90);
-    const sportUpper = S.sport.query.toUpperCase();
-    // Baseball also includes softball permits on the same fields
-    const altQuery = S.sport.id === 'baseball' ? ` OR upper(event_name) like '%SOFTBALL%'` : '';
-    const where = `start_date_time>='${t}T00:00:00.000' AND start_date_time<='${e}T23:59:59.000' AND (upper(event_name) like '%${sportUpper}%'${altQuery})`;
-    const url = `${API}?$limit=1000&$where=${encodeURIComponent(where)}&$order=start_date_time ASC`;
+    // Sport + 90-day window filtering and pagination now happen
+    // server-side in the sync (src/socrata/sync.js) -- this just reads the
+    // already-filtered cache for the selected sport. Borough filtering
+    // stays client-side (groupByField below), matching the previous
+    // direct-Socrata behavior: the fetched set is always citywide so
+    // selectBorough() can re-slice S.rawPermits without a refetch.
+    const url = `${PERMITS_API}?sport=${encodeURIComponent(S.sport.id)}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     S.rawPermits = await res.json();
@@ -4584,7 +4597,7 @@ async function loadFields() {
     renderFields(merged);
     loadMaintenanceFlags(merged);
   } catch(err) {
-    console.warn('NYC Parks API unavailable, using sample data:', err.message);
+    console.warn('Permit cache API unavailable, using sample data:', err.message);
     S.rawPermits = [];
     const base = mergeExternalFields(mockFields(S.sport, S.borough));
     const merged = mergeDatabaseFields(base);
