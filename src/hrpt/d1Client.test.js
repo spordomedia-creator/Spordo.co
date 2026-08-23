@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { replaceFieldPermitWindow, upsertSyncMeta } from "./d1Client.js";
+import { replaceFieldPermitWindow, upsertSyncMeta, getFieldCoverage } from "./d1Client.js";
 import { createFakeD1 } from "./__testUtils__/fakeD1.js";
 
 // See __testUtils__/fakeD1.js for exactly what this fake does and does not
@@ -151,4 +151,26 @@ test("a thrown/rejected run() (not just success:false) is also wrapped into a th
       }),
     /D1 delete\+insert \(batch\) failed for field_id=pier-25.*simulated D1 binding exception/s
   );
+});
+
+test("getFieldCoverage returns the latest cached permit_date per field_id, independent of any query window", async () => {
+  const { db, tables } = createFakeD1();
+  const env = { DB: db };
+
+  tables.field_permit_cache.push(
+    { field_id: "pier-25", permit_date: "2026-08-09", start_time: "10:00", end_time: "11:00", event_name: "old" },
+    { field_id: "pier-25", permit_date: "2026-08-16", start_time: "09:00", end_time: "10:00", event_name: "less old" },
+    { field_id: "pier-26", permit_date: "2026-09-01", start_time: "09:00", end_time: "10:00", event_name: "current" }
+  );
+
+  const coverage = await getFieldCoverage(env, {
+    table: "field_permit_cache",
+    fieldIds: ["pier-25", "pier-26", "pier-40-never-synced"],
+  });
+
+  assert.deepEqual(coverage, [
+    { fieldId: "pier-25", latestDate: "2026-08-16" },
+    { fieldId: "pier-26", latestDate: "2026-09-01" },
+    { fieldId: "pier-40-never-synced", latestDate: null },
+  ]);
 });

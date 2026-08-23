@@ -6,8 +6,9 @@
  * IMPORTANT — what this is and isn't:
  *   - It is NOT a SQL engine. It recognizes only the exact statement shapes
  *     d1Client.js issues today (a windowed DELETE, a plain multi-column
- *     INSERT, and an `INSERT ... ON CONFLICT(field_id) DO UPDATE` upsert)
- *     and applies them to a plain in-memory array per table.
+ *     INSERT, an `INSERT ... ON CONFLICT(field_id) DO UPDATE` upsert, and a
+ *     `SELECT MAX(permit_date) ... WHERE field_id = ?` coverage check via
+ *     `.first()`) and applies them to a plain in-memory array per table.
  *   - It exists so d1Client.js's request-construction and
  *     error-propagation logic (which statements get built, in what order,
  *     with what bound args, and how failures surface) can be unit-tested
@@ -84,6 +85,16 @@ function createFakeD1({ failTables = [] } = {}) {
       },
       async run() {
         return execute(sql, boundArgs);
+      },
+      async first() {
+        calls.push({ sql, args: boundArgs, table: tableNameFromSql(sql), method: "first" });
+        if (/SELECT\s+MAX\(permit_date\)/i.test(sql)) {
+          const [fieldId] = boundArgs;
+          const rows = tables.field_permit_cache.filter((r) => r.field_id === fieldId);
+          const latest = rows.map((r) => r.permit_date).sort().at(-1) || null;
+          return { latest_date: latest };
+        }
+        throw new Error(`fake D1 .first() does not recognize statement: ${sql}`);
       },
       // Exposed for batch(): batch() needs to run the same bound statement.
       _sql: sql,

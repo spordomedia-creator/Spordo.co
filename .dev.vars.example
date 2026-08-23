@@ -30,3 +30,14 @@ SUPABASE_SERVICE_ROLE_KEY=
 # still runs without this set (src/socrata/fetchSocrata.js logs a warning
 # and proceeds anonymously) -- but expect 429s under any real load without it.
 SOCRATA_APP_TOKEN=
+
+# Optional. Slack incoming-webhook URL (src/alerting.js) -- if set, the
+# scheduled sync (src/index.js) posts an alert here when a sync run fails
+# outright, or when HRPT's cached data goes stale source-wide (the source
+# page itself frozen on an old week, not a sync failure -- see
+# alerting.js's header comment for the real 2026-08-22 incident this was
+# built for). Create one at https://api.slack.com/apps -> your app ->
+# Incoming Webhooks -> Add New Webhook to Workspace. If unset, sendSlackAlert
+# just no-ops -- a missing webhook never breaks the sync run it would have
+# reported on. NEVER commit the real value.
+SLACK_ALERT_WEBHOOK_URL=

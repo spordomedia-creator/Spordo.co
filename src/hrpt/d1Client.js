@@ -112,4 +112,23 @@ async function upsertSyncMeta(env, { table, row }) {
   await runStatement(stmt, { fieldId: row.field_id, table, action: "sync-meta upsert" });
 }
 
-export { replaceFieldPermitWindow, upsertSyncMeta };
+/**
+ * For each fieldId, return the most recent (MAX) permit_date cached for it,
+ * or null if none has ever been written. Used by the staleness-alert check
+ * (see src/alerting.js) to detect a source page frozen on an old date
+ * range even when the sync itself succeeds and writes real data -- see
+ * that file's header comment for the full incident this was built for.
+ */
+async function getFieldCoverage(env, { table, fieldIds }) {
+  assertConfigured(env);
+  return Promise.all(
+    fieldIds.map(async (fieldId) => {
+      const row = await env.DB.prepare(`SELECT MAX(permit_date) AS latest_date FROM ${table} WHERE field_id = ?`)
+        .bind(fieldId)
+        .first();
+      return { fieldId, latestDate: row?.latest_date || null };
+    })
+  );
+}
+
+export { replaceFieldPermitWindow, upsertSyncMeta, getFieldCoverage };
