@@ -1278,6 +1278,24 @@ body::after {
 .schd-ext-footer .ext-note { flex: 1 1 240px; margin-top: 0; }
 .schd-ext-footer .ext-book-btn { flex-shrink: 0; margin-top: 0; padding: 7px 14px; }
 
+.schd-stale-notice {
+  display: flex; align-items: flex-start; gap: 14px;
+  margin: 20px 0; padding: 18px 20px;
+  background: rgba(234,179,8,0.08);
+  border: 1px solid rgba(234,179,8,0.30);
+  border-radius: 12px;
+  color: var(--c-yellow);
+}
+.schd-stale-notice svg { flex-shrink: 0; margin-top: 2px; }
+.schd-stale-title {
+  font-family: var(--f-body); font-weight: 700; font-size: 15px;
+  color: var(--c-white); margin-bottom: 4px;
+}
+.schd-stale-detail {
+  font-family: var(--f-body); font-size: 13px; line-height: 1.5;
+  color: var(--c-w70);
+}
+
 @media (max-width: 768px) {
   .schd-header { padding: 20px 20px 0; }
   .schd-body { padding: 0 20px; }
@@ -5410,6 +5428,31 @@ function renderSchdBody() {
       return;
     }
 
+    // The sync ran and wrote real data, but none of it reaches today --
+    // the SOURCE page itself is stuck on an old week (confirmed live,
+    // 2026-08-22: HRPT's own site frozen on a schedule over a week stale).
+    // Showing the normal grid here would render every day "Free" with no
+    // way to tell that apart from genuine availability, which is actively
+    // misleading -- so replace it with an explicit, unmissable notice
+    // instead of guessing.
+    if (f._sourceStale) {
+      const latest = f._sourceLatestDate
+        ? new Date(f._sourceLatestDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        : null;
+      el.innerHTML = `<div class="schd-stale-notice">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M10 2L1 17h18L10 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+            <path d="M10 8v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <circle cx="10" cy="14.5" r="0.9" fill="currentColor"/>
+          </svg>
+          <div>
+            <div class="schd-stale-title">No current schedule available</div>
+            <div class="schd-stale-detail">${esc(f.orgShort)}'s own schedule page hasn't been updated${latest ? ` since ${esc(latest)}` : ''}. We won't guess at availability from out-of-date information — check directly with ${esc(f.orgShort)} below.</div>
+          </div>
+        </div>` + footer;
+      return;
+    }
+
     if (S.panelView === 'month') {
       renderSchdMonth(f, '', footer);
     } else {
@@ -6263,6 +6306,14 @@ async function loadExternalPermits(f) {
   // Distinct from an empty `permits` array, which just means "no bookings
   // in the cached window" for a field that IS on a real schedule.
   f._noPermitSchedule = meta?.live_availability_status === 'no_permit_schedule';
+  // The sync can run successfully and stamp a fresh last_permit_sync_at
+  // even when the SOURCE page itself is stuck on an old week (confirmed
+  // live, 2026-08-22: HRPT's own site frozen showing a schedule over a
+  // week in the past) -- that's not "no bookings", it's "we have no
+  // current data at all", and showing an all-"Free" grid for it would be
+  // actively misleading. See permitsApi.js source_data_stale.
+  f._sourceStale = meta?.source_data_stale === true;
+  f._sourceLatestDate = meta?.latest_permit_date || null;
   f._permitsLoaded = true;
 }
 
