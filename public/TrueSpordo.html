@@ -5805,15 +5805,27 @@ const WL_KEY = 'spordo_waitlist';
 const WL_ME_KEY = 'spordo_wl_me';
 
 // ── Loops.so — same endpoint as waitlist.html ──────────────────────────────
-const LOOPS_FORM_URL = ''; // ← paste your Loops form endpoint URL here
+const LOOPS_FORM_URL = 'https://app.loops.so/api/newsletter-form/cmpaol0lj0ncv0j0hi05wbhkk';
 
+// Body shape and Content-Type copied exactly from Loops' own generated
+// embed snippet (Loops dashboard -> Forms -> Simple form -> HTML tab),
+// not guessed -- confirmed 2026-08-23. That snippet POSTs
+// application/x-www-form-urlencoded with literal keys
+// "userGroup=&mailingLists=&email=<value>", NOT JSON. The previous
+// version of this function sent JSON with {email, firstName}, which this
+// endpoint would very likely not have parsed correctly even once a real
+// URL was filled in -- silently losing signups despite a 200 response.
+// This particular form (SPORDO's "Simple form" in the Loops dashboard)
+// only collects email, no name field, so `name` is accepted for call-site
+// compatibility but intentionally unused.
 async function loopsRegister(name, email) {
   if (!LOOPS_FORM_URL) return;
   try {
+    const body = 'userGroup=&mailingLists=&email=' + encodeURIComponent(email);
     await fetch(LOOPS_FORM_URL, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ email, firstName: name }),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
     });
   } catch(err) {
     console.warn('Loops registration failed (non-critical):', err.message);
