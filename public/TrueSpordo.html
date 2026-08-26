@@ -3673,16 +3673,17 @@ const FIELD_COORDS = {
   'Pier 40 Field A':                   [40.72952, -74.01321],
   'Pier 40 Field B':                   [40.72944, -74.01295],
   'Pier 40 Field C':                   [40.72935, -74.01268],
-  'Pier 40 — Field A':                 [40.72952, -74.01321],
-  'Pier 40 — Field B':                 [40.72944, -74.01295],
-  'Pier 40 — Field C':                 [40.72935, -74.01268],
   'Pier 40 Courtyard East Field':      [40.72965, -74.01260],
   'Pier 40 Courtyard West Field':      [40.72965, -74.01320],
   'Pier 40 Indoor Field':              [40.72938, -74.01305],
   'Pier 40 Rooftop Field #1':          [40.72980, -74.01340],
   'Pier 40 Rooftop Field #2':          [40.72975, -74.01295],
   'Pier 25 Artificial Turf Field':     [40.72390, -74.01010],
-  'Gansevoort Peninsula Field':        [40.74075, -74.01310],
+  // 'Pier 40 — Field A/B/C' and non-"Playing" 'Gansevoort Peninsula Field'
+  // coord entries removed (2026-08-26) alongside their EXTERNAL_ORGS
+  // entries above -- those exact names never matched a real field and are
+  // no longer referenced anywhere. 'Pier 40 Field A/B/C' (no em dash,
+  // below) are kept: still referenced by the FIELD_DIRECTORY soccer list.
   'Gansevoort Peninsula Playing Field':[40.74080, -74.01315],
   'Rucker Park':                       [40.82154, -73.93459],
   'West 4th Street Courts':            [40.73023, -74.00237],
@@ -4160,10 +4161,17 @@ const FIELD_DIRECTORY = [
 /* ── EXTERNAL (NON-PARKS) FIELDS ─────────────── */
 const EXTERNAL_ORGS = [
   // Hudson River Park Trust
-  { name:'Pier 40 — Field A',           sport:'soccer',     borough:'MANHATTAN', org:'Hudson River Park Trust',       orgShort:'HRPT',  bookingUrl:'https://www.hudsonriverpark.org/explore-the-park/activities/pier-40-athletic-facilities/' },
-  { name:'Pier 40 — Field B',           sport:'soccer',     borough:'MANHATTAN', org:'Hudson River Park Trust',       orgShort:'HRPT',  bookingUrl:'https://www.hudsonriverpark.org/explore-the-park/activities/pier-40-athletic-facilities/' },
-  { name:'Pier 40 — Field C',           sport:'soccer',     borough:'MANHATTAN', org:'Hudson River Park Trust',       orgShort:'HRPT',  bookingUrl:'https://www.hudsonriverpark.org/explore-the-park/activities/pier-40-athletic-facilities/' },
-  { name:'Gansevoort Peninsula Field',  sport:'soccer',     borough:'MANHATTAN', org:'Hudson River Park Trust',       orgShort:'HRPT',  bookingUrl:'https://www.hudsonriverpark.org/' },
+  // Pier 40 — Field A/B/C and "Gansevoort Peninsula Field" used to be
+  // listed here as separate legacy placeholder entries. Removed
+  // (2026-08-26): none of those names ever matched a real HRPT schedule
+  // table (see src/hrpt/fieldMap.js EXACT_NAME_TO_FIELD_ID/ALIASES), so
+  // they never had real synced D1 data behind them -- yet they still
+  // rendered a normal schedule grid with an empty permits array, showing
+  // every day as fabricated "Free" availability (confirmed live on
+  // "Pier 40 — Field C"). Correctly-named real equivalents already exist
+  // in FIELD_DATABASE with genuine HRPT sync coverage: Pier 40 Courtyard
+  // East/West Field, Pier 40 Indoor Field, Pier 40 Rooftop Field #1/#2,
+  // and Gansevoort Peninsula Playing Field.
   // Brooklyn Bridge Park
   { name:'Pier 5 Soccer Field',         sport:'soccer',     borough:'BROOKLYN',  org:'Brooklyn Bridge Park',          orgShort:'BBP',   bookingUrl:'https://www.brooklynbridgepark.org/fields' },
   // Randall's Island and Prospect Park fields are NOT independently
@@ -4666,7 +4674,19 @@ function mergeExternalFields(parksFields) {
   const externals = EXTERNAL_ORGS.filter(e =>
     e.sport === sportId && (borough === 'ALL' || e.borough === borough)
   );
-  const parksNamesLower = parksFields.map(f => f.name.toLowerCase());
+  // De-dupe against parksFields (Socrata/Parks-derived) AND FIELD_DATABASE
+  // (the real, correctly-named field list) -- this used to only check
+  // parksFields, which ran BEFORE mergeDatabaseFields() had merged
+  // FIELD_DATABASE in (see the call chain in loadFields()), so an
+  // EXTERNAL_ORGS entry could never actually get caught as a duplicate of
+  // a real FIELD_DATABASE entry with a different-but-overlapping name (the
+  // Pier 40/Gansevoort bug, fixed 2026-08-26). Checking FIELD_DATABASE
+  // here directly closes that gap for any future EXTERNAL_ORGS addition,
+  // without needing to reorder the merge pipeline.
+  const dbNamesLower = FIELD_DATABASE
+    .filter(e => e.sport === sportId && (borough === 'ALL' || e.borough === borough))
+    .map(e => e.name.toLowerCase());
+  const parksNamesLower = [...parksFields.map(f => f.name.toLowerCase()), ...dbNamesLower];
   const newExternals = externals
     .filter(e => {
       const eLow = e.name.toLowerCase();
@@ -5448,6 +5468,26 @@ function renderSchdBody() {
           <div>
             <div class="schd-stale-title">No current schedule available</div>
             <div class="schd-stale-detail">${esc(f.orgShort)}'s own schedule page hasn't been updated${latest ? ` since ${esc(latest)}` : ''}. We won't guess at availability from out-of-date information — check directly with ${esc(f.orgShort)} below.</div>
+          </div>
+        </div>` + footer;
+      return;
+    }
+
+    // No field_sync_meta row at all -- this field_id was never synced into
+    // D1 (either it's not on the HRPT pipeline, or the name doesn't match
+    // a real HRPT table). Same "don't guess" principle as the stale-source
+    // notice above, but different wording since there's no
+    // latest_permit_date to cite -- we have zero real data, not old data.
+    if (f._notSynced) {
+      el.innerHTML = `<div class="schd-stale-notice">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M10 2L1 17h18L10 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+            <path d="M10 8v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <circle cx="10" cy="14.5" r="0.9" fill="currentColor"/>
+          </svg>
+          <div>
+            <div class="schd-stale-title">No live availability data</div>
+            <div class="schd-stale-detail">We don't have real-time schedule data for this field yet. We won't guess at availability — check directly with ${esc(f.orgShort)} below.</div>
           </div>
         </div>` + footer;
       return;
@@ -6326,6 +6366,16 @@ async function loadExternalPermits(f) {
   // actively misleading. See permitsApi.js source_data_stale.
   f._sourceStale = meta?.source_data_stale === true;
   f._sourceLatestDate = meta?.latest_permit_date || null;
+  // meta === null means this field_id has never been synced into D1 at all
+  // (no field_sync_meta row) -- distinct from "synced but stale". Every
+  // EXTERNAL_ORGS field routes through this same fetch regardless of
+  // whether it's actually an HRPT field on the D1 sync pipeline (see
+  // CLAUDE.md's "storage is split" note -- only HRPT syncs to D1), so for
+  // most non-HRPT orgs this will ALWAYS be true. Rendering the normal grid
+  // here would silently show every day as "Free", which is a fabricated
+  // positive, not just missing data -- confirmed live on "Pier 40 — Field
+  // C" (a stale EXTERNAL_ORGS entry with no real HRPT table behind it).
+  f._notSynced = meta === null;
   f._permitsLoaded = true;
 }
 
