@@ -33,3 +33,32 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
+
+      # A real incident (2026-08-22) had 3 deploys in a row fail silently
+      # from an expired CLOUDFLARE_API_TOKEN -- nobody noticed until someone
+      # happened to check the Actions tab. Slack alerting already exists for
+      # sync failures (src/alerting.js) but nothing watched the deploy
+      # pipeline itself. Reuses the same webhook name/Slack channel as that
+      # alerting -- add it as a GitHub Actions repo secret (Settings ->
+      # Secrets and variables -> Actions), separate from the Cloudflare
+      # Worker secret of the same name (different store, same URL value is
+      # fine). No-ops with a log line if the secret isn't set yet, so this
+      # step never itself breaks the workflow.
+      - name: Alert Slack on deploy failure
+        if: failure()
+        env:
+          SLACK_ALERT_WEBHOOK_URL: ${{ secrets.SLACK_ALERT_WEBHOOK_URL }}
+          COMMIT_SHA: ${{ github.sha }}
+          COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          if [ -z "$SLACK_ALERT_WEBHOOK_URL" ]; then
+            echo "SLACK_ALERT_WEBHOOK_URL is not set as a GitHub Actions secret -- skipping Slack alert. The deploy failure above is still real; add the secret to get notified next time."
+            exit 0
+          fi
+          short_sha="${COMMIT_SHA:0:7}"
+          payload=$(jq -n \
+            --arg text "🚨 SPORDO deploy to Cloudflare Workers FAILED — commit ${short_sha} by ${ACTOR}. Run: ${RUN_URL} | Commit: ${COMMIT_URL}" \
+            '{text: $text}')
+          curl -sf -X POST -H 'Content-Type: application/json' --data "$payload" "$SLACK_ALERT_WEBHOOK_URL"
