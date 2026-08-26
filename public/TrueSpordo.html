@@ -37,7 +37,6 @@
   <div class="nav-links">
     <div class="nav-link active" data-view="home"    onclick="go('home')"    role="link" tabindex="0">Fields</div>
     <div class="nav-link"        data-view="mission" onclick="go('mission')" role="link" tabindex="0">Mission</div>
-    <div class="nav-link"        data-view="donate"  onclick="go('donate')"  role="link" tabindex="0">Donate</div>
     <div class="nav-link"        data-view="waitlist" onclick="go('waitlist')" role="link" tabindex="0">Waitlist</div>
     <div class="nav-link"        data-view="saved"   onclick="go('saved')"   role="link" tabindex="0">Saved</div>
     <a class="nav-link" href="http://127.0.0.1:5001" target="_blank" rel="noopener" tabindex="0">Permits ↗</a>
@@ -347,13 +346,6 @@
     </div>
   </div>
 
-  <!-- ── BRIDGE CTA ── -->
-  <div class="mv-bridge">
-    <h2 class="mv-bridge-h2">KEEP IT<br><em>FREE</em></h2>
-    <p class="mv-bridge-sub">Spordo runs on donations from the community it serves. If this saved you a wasted trip, consider keeping it alive for the next person.</p>
-    <button class="btn-primary" onclick="go('donate')" style="font-size:17px;padding:16px 44px;">SUPPORT SPORDO →</button>
-  </div>
-
   <footer class="footer">
     <div class="footer-left">
       <div class="footer-logo">SPOR<span class="em">DO</span></div>
@@ -488,12 +480,7 @@
     <div class="dv-faq-item" onclick="toggleFaq(this)">
       <div class="dv-faq-q" role="button" aria-expanded="false">Who built Spordo? <span class="dv-faq-icon" aria-hidden="true"></span></div>
       <div class="dv-faq-a"><p>A small team of New Yorkers who grew up playing in these parks. No venture funding, no corporate backing. We built this because we needed it — and because nobody else was building it for us.</p></div>
-    </div>
-    <div class="dv-faq-item" onclick="toggleFaq(this)">
-      <div class="dv-faq-q" role="button" aria-expanded="false">Can I cancel a monthly contribution? <span class="dv-faq-icon" aria-hidden="true"></span></div>
-      <div class="dv-faq-a"><p>Yes, anytime. Monthly contributions are processed through Stripe. You'll get a receipt when you donate and can cancel from the Stripe customer portal with one click. No questions asked.</p></div>
-    </div>
-  </div>
+    </div>  </div>
 
   <!-- Mobile sticky CTA — shown via JS when donate button is off-screen -->
   <div class="dv-sticky-cta" id="dv-sticky-cta" aria-hidden="true">
