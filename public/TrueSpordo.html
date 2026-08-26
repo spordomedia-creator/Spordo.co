@@ -176,6 +176,16 @@
     </div>
   </div>
 
+  <!-- Borough filter -->
+  <div class="borough-strip" role="group" aria-label="Filter fields by borough">
+    <button type="button" class="bchip active" data-b="ALL" aria-pressed="true" onclick="selectBorough('ALL', this)">All Boroughs</button>
+    <button type="button" class="bchip" data-b="MANHATTAN" aria-pressed="false" onclick="selectBorough('MANHATTAN', this)" style="--bc-color:#8B5CF6"><span class="bchip-dot"></span>Manhattan</button>
+    <button type="button" class="bchip" data-b="BROOKLYN" aria-pressed="false" onclick="selectBorough('BROOKLYN', this)" style="--bc-color:#3B82F6"><span class="bchip-dot"></span>Brooklyn</button>
+    <button type="button" class="bchip" data-b="QUEENS" aria-pressed="false" onclick="selectBorough('QUEENS', this)" style="--bc-color:#F59E0B"><span class="bchip-dot"></span>Queens</button>
+    <button type="button" class="bchip" data-b="BRONX" aria-pressed="false" onclick="selectBorough('BRONX', this)" style="--bc-color:#F97316"><span class="bchip-dot"></span>The Bronx</button>
+    <button type="button" class="bchip" data-b="STATEN ISLAND" aria-pressed="false" onclick="selectBorough('STATEN ISLAND', this)" style="--bc-color:#14B8A6"><span class="bchip-dot"></span>Staten Island</button>
+  </div>
+
   <!-- Interactive Map -->
   <div class="fv-map-wrap">
     <div class="fv-map-container">
@@ -1859,7 +1869,10 @@ function selectBorough(b, btn) {
     c.setAttribute('aria-pressed', c.dataset.b === b ? 'true' : 'false');
   });
   if (S.rawPermits.length) {
-    renderFields(groupByField(S.rawPermits, b));
+    // Same merge pipeline loadFields() uses — re-filtering with just
+    // groupByField() would drop every external-org and FIELD_DATABASE
+    // field the initial load had merged in.
+    renderFields(mergeDatabaseFields(mergeExternalFields(groupByField(S.rawPermits, b))));
   } else {
     loadFields();
   }
