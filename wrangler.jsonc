@@ -52,17 +52,12 @@
   // replaced); access is controlled entirely by this binding existing in
   // the Worker's deployment.
   //
-  // NOTE: `database_id` below is a placeholder. This sandbox has no real
-  // Cloudflare account access, so the database has not been provisioned
-  // yet. Whoever has real Cloudflare access needs to, once:
-  //   1. Create the database:
-  //        wrangler d1 create spordo-hrpt
-  //      This prints a `database_id` (a UUID) — paste it in below,
-  //      replacing "REPLACE_WITH_REAL_DATABASE_ID".
-  //   2. Apply the schema migration (migrations/0001_init.sql):
-  //        wrangler d1 migrations apply spordo-hrpt --remote
-  //      (add/also run with `--local` for local `wrangler dev` testing)
-  //   3. Redeploy so the binding takes effect: `wrangler deploy`
+  // `database_id` below is the real production database — provisioned,
+  // migrated, and confirmed live (checked directly via the Cloudflare D1
+  // API during a 2026-08-26 launch-readiness pass: field_permit_cache and
+  // field_sync_meta both exist with fresh rows from that day's sync). Not
+  // a placeholder; the note that used to be here describing manual
+  // provisioning steps was stale and has been removed.
   //
   // Scoped only to the HRPT sync pipeline right now — this does NOT touch
   // the Supabase project the frontend (public/TrueSpordo.html) still uses

@@ -176,6 +176,16 @@
     </div>
   </div>
 
+  <!-- Borough filter -->
+  <div class="borough-strip" role="group" aria-label="Filter fields by borough">
+    <button type="button" class="bchip active" data-b="ALL" aria-pressed="true" onclick="selectBorough('ALL', this)">All Boroughs</button>
+    <button type="button" class="bchip" data-b="MANHATTAN" aria-pressed="false" onclick="selectBorough('MANHATTAN', this)" style="--bc-color:#8B5CF6"><span class="bchip-dot"></span>Manhattan</button>
+    <button type="button" class="bchip" data-b="BROOKLYN" aria-pressed="false" onclick="selectBorough('BROOKLYN', this)" style="--bc-color:#3B82F6"><span class="bchip-dot"></span>Brooklyn</button>
+    <button type="button" class="bchip" data-b="QUEENS" aria-pressed="false" onclick="selectBorough('QUEENS', this)" style="--bc-color:#F59E0B"><span class="bchip-dot"></span>Queens</button>
+    <button type="button" class="bchip" data-b="BRONX" aria-pressed="false" onclick="selectBorough('BRONX', this)" style="--bc-color:#F97316"><span class="bchip-dot"></span>The Bronx</button>
+    <button type="button" class="bchip" data-b="STATEN ISLAND" aria-pressed="false" onclick="selectBorough('STATEN ISLAND', this)" style="--bc-color:#14B8A6"><span class="bchip-dot"></span>Staten Island</button>
+  </div>
+
   <!-- Interactive Map -->
   <div class="fv-map-wrap">
     <div class="fv-map-container">
@@ -1670,6 +1680,17 @@ function esc(s) {
   if (!s) return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+// For external free-text (e.g. Socrata event_location) embedded as a
+// single-quoted JS string literal INSIDE an inline onclick="..." HTML
+// attribute. HTML-attribute-escaping alone (esc()) doesn't help here: the
+// browser decodes HTML entities in the attribute value BEFORE compiling it
+// as JS, so an entity-encoded quote round-trips right back to a literal `'`
+// in the resulting JS source and still breaks out of the string. Escape for
+// the JS-string context first (backslash, then quote), then esc() the
+// result so it's also safe as the surrounding HTML attribute's content.
+function jsStr(s) {
+  return String(s == null ? '' : s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+}
 function today() { return new Date().toISOString().split('T')[0]; }
 function daysFrom(n) { const d = new Date(); d.setDate(d.getDate()+n); return d.toISOString().split('T')[0]; }
 function parseHour(t) { if (!t) return 99; const p = String(t).split(':'); return parseInt(p[0],10)||0; }
@@ -1736,8 +1757,8 @@ function renderHeroResults(q) {
   container.innerHTML = `<div class="sr-pill-wrap">${list.map(f => {
     const sp = SPORTS.find(s => s.id === f.sport);
     return `<button class="sr-pill"
-      onclick="goToField('${esc(f.sport)}','${esc(f.name)}')"
-      onkeydown="if(event.key==='Enter')goToField('${esc(f.sport)}','${esc(f.name)}')">
+      onclick="goToField('${esc(jsStr(f.sport))}','${esc(jsStr(f.name))}')"
+      onkeydown="if(event.key==='Enter')goToField('${esc(jsStr(f.sport))}','${esc(jsStr(f.name))}')">
       <span class="sr-pill-name">${esc(f.name)}</span><span class="sr-pill-sep">·</span><span class="sr-pill-sport">${esc(sp?.name || f.sport)}</span>
     </button>`;
   }).join('')}</div>`;
@@ -1859,7 +1880,10 @@ function selectBorough(b, btn) {
     c.setAttribute('aria-pressed', c.dataset.b === b ? 'true' : 'false');
   });
   if (S.rawPermits.length) {
-    renderFields(groupByField(S.rawPermits, b));
+    // Same merge pipeline loadFields() uses — re-filtering with just
+    // groupByField() would drop every external-org and FIELD_DATABASE
+    // field the initial load had merged in.
+    renderFields(mergeDatabaseFields(mergeExternalFields(groupByField(S.rawPermits, b))));
   } else {
     loadFields();
   }
