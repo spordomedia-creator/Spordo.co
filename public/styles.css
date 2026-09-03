@@ -1261,7 +1261,8 @@ body::after {
 .schd-ext-footer .ext-note { flex: 1 1 240px; margin-top: 0; }
 .schd-ext-footer .ext-book-btn { flex-shrink: 0; margin-top: 0; padding: 7px 14px; }
 
-.schd-stale-notice {
+.schd-stale-notice,
+.fv-sample-notice {
   display: flex; align-items: flex-start; gap: 14px;
   margin: 20px 0; padding: 18px 20px;
   background: rgba(234,179,8,0.08);
@@ -1269,7 +1270,12 @@ body::after {
   border-radius: 12px;
   color: var(--c-yellow);
 }
-.schd-stale-notice svg { flex-shrink: 0; margin-top: 2px; }
+.schd-stale-notice svg,
+.fv-sample-notice svg { flex-shrink: 0; margin-top: 2px; }
+.fv-sample-notice span {
+  font-family: var(--f-body); font-size: 13.5px; line-height: 1.5;
+  color: var(--c-white);
+}
 .schd-stale-title {
   font-family: var(--f-body); font-weight: 700; font-size: 15px;
   color: var(--c-white); margin-bottom: 4px;
