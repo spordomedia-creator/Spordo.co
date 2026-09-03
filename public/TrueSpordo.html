@@ -30,16 +30,16 @@
 
 <!-- ── NAV ─────────────────────────────────── -->
 <nav class="nav" role="navigation" aria-label="Main navigation">
-  <div class="nav-logo" onclick="go('home')" role="link" tabindex="0" aria-label="Spordo home">
-    <img src="/images/logo.png" style="height:48px;width:auto;">
+  <div class="nav-logo" onclick="go('home')" onkeydown="if(event.key==='Enter')go('home')" role="link" tabindex="0" aria-label="Spordo home">
+    <img src="/images/logo.png" alt="" style="height:48px;width:auto;">
     <span class="nav-logo-text">SPOR<span class="dot">DO</span></span>
   </div>
   <div class="nav-links">
-    <div class="nav-link active" data-view="home"    onclick="go('home')"    role="link" tabindex="0">Fields</div>
-    <div class="nav-link"        data-view="mission" onclick="go('mission')" role="link" tabindex="0">Mission</div>
-    <div class="nav-link"        data-view="waitlist" onclick="go('waitlist')" role="link" tabindex="0">Waitlist</div>
-    <div class="nav-link"        data-view="saved"   onclick="go('saved')"   role="link" tabindex="0">Saved</div>
-    <div class="nav-account-btn" id="nav-account-btn" onclick="authModal(true)" role="button" tabindex="0" aria-label="Sign in or manage account">Sign In</div>
+    <div class="nav-link active" data-view="home"    onclick="go('home')"    onkeydown="if(event.key==='Enter')go('home')"    role="link" tabindex="0">Fields</div>
+    <div class="nav-link"        data-view="mission" onclick="go('mission')" onkeydown="if(event.key==='Enter')go('mission')" role="link" tabindex="0">Mission</div>
+    <div class="nav-link"        data-view="waitlist" onclick="go('waitlist')" onkeydown="if(event.key==='Enter')go('waitlist')" role="link" tabindex="0">Waitlist</div>
+    <div class="nav-link"        data-view="saved"   onclick="go('saved')"   onkeydown="if(event.key==='Enter')go('saved')"   role="link" tabindex="0">Saved</div>
+    <div class="nav-account-btn" id="nav-account-btn" onclick="authModal(true)" onkeydown="if(event.key==='Enter')authModal(true)" role="button" tabindex="0" aria-label="Sign in or manage account">Sign In</div>
     <div class="nav-live" aria-live="polite">
       <span class="live-pulse" aria-hidden="true"></span>
       <span>Live</span>
@@ -58,19 +58,19 @@
       <button class="auth-tab active" data-tab="signin"  onclick="authTab('signin')">Sign In</button>
       <button class="auth-tab"        data-tab="signup"  onclick="authTab('signup')">Create Account</button>
     </div>
-    <div id="auth-msg" class="auth-msg" style="display:none"></div>
+    <div id="auth-msg" class="auth-msg" style="display:none" role="alert" aria-live="polite"></div>
     <!-- Sign In form -->
     <div id="auth-form-signin" style="display:flex;flex-direction:column;gap:12px">
-      <input id="auth-signin-email" class="auth-input" type="email"    placeholder="Email"    autocomplete="email">
-      <input id="auth-signin-pass"  class="auth-input" type="password" placeholder="Password" autocomplete="current-password"
+      <input id="auth-signin-email" class="auth-input" type="email"    placeholder="Email"    aria-label="Email"    autocomplete="email">
+      <input id="auth-signin-pass"  class="auth-input" type="password" placeholder="Password" aria-label="Password" autocomplete="current-password"
              onkeydown="if(event.key==='Enter')authSignIn()">
       <button id="auth-signin-btn" class="auth-btn" onclick="authSignIn()">Sign In</button>
     </div>
     <!-- Sign Up form -->
     <div id="auth-form-signup" style="display:none;flex-direction:column;gap:12px">
-      <input id="auth-signup-name"  class="auth-input" type="text"     placeholder="Your name"              autocomplete="name">
-      <input id="auth-signup-email" class="auth-input" type="email"    placeholder="Email"                  autocomplete="email">
-      <input id="auth-signup-pass"  class="auth-input" type="password" placeholder="Password (min 8 chars)" autocomplete="new-password"
+      <input id="auth-signup-name"  class="auth-input" type="text"     placeholder="Your name"              aria-label="Your name"                autocomplete="name">
+      <input id="auth-signup-email" class="auth-input" type="email"    placeholder="Email"                  aria-label="Email"                    autocomplete="email">
+      <input id="auth-signup-pass"  class="auth-input" type="password" placeholder="Password (min 8 chars)" aria-label="Password (min 8 chars)" autocomplete="new-password"
              onkeydown="if(event.key==='Enter')authSignUp()">
       <button id="auth-signup-btn"  class="auth-btn" onclick="authSignUp()">Create Account</button>
     </div>
@@ -120,7 +120,7 @@
       <h2 class="section-title">SELECT <span class="em">YOUR</span> SPORT</h2>
       <span class="section-kicker">8 Sports — 5 Boroughs</span>
     </div>
-    <div class="sport-grid" id="sport-grid" role="list"></div>
+    <div class="sport-grid" id="sport-grid"></div>
   </div>
 
   <footer class="footer">
@@ -470,16 +470,16 @@
     <div class="dv-faq-kicker">Questions</div>
     <h2 class="dv-faq-h2">THE HONEST ANSWERS</h2>
 
-    <div class="dv-faq-item" onclick="toggleFaq(this)">
-      <div class="dv-faq-q" role="button" aria-expanded="false">Is Spordo actually free to use? <span class="dv-faq-icon" aria-hidden="true"></span></div>
+    <div class="dv-faq-item">
+      <div class="dv-faq-q" role="button" tabindex="0" aria-expanded="false" onclick="toggleFaq(this)" onkeydown="if(event.key==='Enter')toggleFaq(this)">Is Spordo actually free to use? <span class="dv-faq-icon" aria-hidden="true"></span></div>
       <div class="dv-faq-a"><p>Yes, completely. No login, no subscription, no paywalled data. Every field, every permit status, every map view — free to anyone with a phone. That's not a marketing line. It's how we built it, and it's how we plan to keep it.</p></div>
     </div>
-    <div class="dv-faq-item" onclick="toggleFaq(this)">
-      <div class="dv-faq-q" role="button" aria-expanded="false">Where does my money actually go? <span class="dv-faq-icon" aria-hidden="true"></span></div>
+    <div class="dv-faq-item">
+      <div class="dv-faq-q" role="button" tabindex="0" aria-expanded="false" onclick="toggleFaq(this)" onkeydown="if(event.key==='Enter')toggleFaq(this)">Where does my money actually go? <span class="dv-faq-icon" aria-hidden="true"></span></div>
       <div class="dv-faq-a"><p>Server costs, map tile hosting, NYC Parks data access, and development time. We don't pay ourselves salaries from this. Spordo is a community project, and donations go toward keeping the infrastructure running and the data current.</p></div>
     </div>
-    <div class="dv-faq-item" onclick="toggleFaq(this)">
-      <div class="dv-faq-q" role="button" aria-expanded="false">Who built Spordo? <span class="dv-faq-icon" aria-hidden="true"></span></div>
+    <div class="dv-faq-item">
+      <div class="dv-faq-q" role="button" tabindex="0" aria-expanded="false" onclick="toggleFaq(this)" onkeydown="if(event.key==='Enter')toggleFaq(this)">Who built Spordo? <span class="dv-faq-icon" aria-hidden="true"></span></div>
       <div class="dv-faq-a"><p>A small team of New Yorkers who grew up playing in these parks. No venture funding, no corporate backing. We built this because we needed it — and because nobody else was building it for us.</p></div>
     </div>  </div>
 
@@ -525,13 +525,13 @@
       </div>
 
       <form class="gate-form" onsubmit="wvSubmit(event)">
-        <input class="gate-input" id="wv-name"  type="text"  placeholder="Your name"     autocomplete="given-name" required />
-        <input class="gate-input" id="wv-email" type="email" placeholder="Email address" autocomplete="email"      required />
+        <input class="gate-input" id="wv-name"  type="text"  placeholder="Your name"     aria-label="Your name"     autocomplete="given-name" required />
+        <input class="gate-input" id="wv-email" type="email" placeholder="Email address" aria-label="Email address" autocomplete="email"      required />
         <label class="gate-consent-row">
           <input type="checkbox" id="wv-consent" />
           <span class="gate-consent-txt">I agree to the <a onclick="go('legal'); event.preventDefault();" href="#">Terms of Service</a> and <a onclick="go('legal'); switchLegalView('pp'); event.preventDefault();" href="#">Privacy Policy</a>. I consent to receive updates about Spordo.</span>
         </label>
-        <span class="gate-consent-err" id="wv-consent-err">Please accept the terms to continue.</span>
+        <span class="gate-consent-err" id="wv-consent-err" role="alert" aria-live="polite">Please accept the terms to continue.</span>
         <button class="gate-submit-btn" id="wv-submit-btn" type="submit">Join Waitlist →</button>
       </form>
 
@@ -1769,7 +1769,7 @@ document.addEventListener('keydown', e => {
 function renderSportGrid() {
   const g = document.getElementById('sport-grid');
   g.innerHTML = SPORTS.map((sp,i) => `
-    <div class="sport-card" role="listitem button" tabindex="0"
+    <div class="sport-card" role="button" tabindex="0"
          style="--sc-glow:${sp.glow};--sc-border:${sp.border};--sc-shadow:${sp.shadow};--sc-accent:${sp.accent};--sc-bg:var(--bg-${sp.id});animation-delay:${i*0.05}s"
          onclick="pickSport('${sp.id}')" onkeydown="if(event.key==='Enter')pickSport('${sp.id}')"
          aria-label="Browse ${sp.name} fields">
@@ -3115,10 +3115,14 @@ function setFreq(freq) {
   });
 }
 
-function toggleFaq(item) {
+// Called with the .dv-faq-q trigger element (it's the focusable/clickable
+// piece so keyboard users can reach it -- putting tabindex on the outer
+// .dv-faq-item instead would nest one interactive element inside another,
+// since .dv-faq-q already has to carry role="button" for its own label).
+function toggleFaq(q) {
+  const item = q.closest('.dv-faq-item');
   const isOpen = item.classList.contains('open');
   const answer = item.querySelector('.dv-faq-a');
-  const q = item.querySelector('.dv-faq-q');
   if (isOpen) {
     // Snap to measured height, then animate to 0
     answer.style.height = answer.scrollHeight + 'px';
@@ -3449,6 +3453,23 @@ function authMsg(msg, isErr) {
   el.style.display = msg ? 'block' : 'none';
 }
 
+// Supabase's own error.message strings were previously shown to users
+// verbatim -- raw technical copy ("Invalid login credentials") that breaks
+// tone with the rest of the app's voice and, for some cases, isn't
+// actionable as-is. Maps the handful of errors a real user will actually
+// hit to plain copy in the app's own voice; anything unrecognized falls
+// back to a generic message rather than leaking the raw string.
+function friendlyAuthError(message) {
+  const m = String(message || '').toLowerCase();
+  if (m.includes('invalid login credentials')) return "That email and password don't match. Double-check and try again.";
+  if (m.includes('already registered') || m.includes('already exists')) return 'An account with that email already exists — try signing in instead.';
+  if (m.includes('email not confirmed')) return 'Check your inbox to confirm your email before signing in.';
+  if (m.includes('rate limit')) return "Too many attempts — give it a minute and try again.";
+  if (m.includes('password')) return 'Password must be at least 8 characters.';
+  if (m.includes('email') && (m.includes('invalid') || m.includes('valid'))) return 'That doesn\'t look like a valid email address.';
+  return "Something went wrong on our end — give it another try.";
+}
+
 /* ── AUTH ACTIONS ────────────────────────────── */
 async function authSignUp() {
   const name  = document.getElementById('auth-signup-name').value.trim();
@@ -3464,7 +3485,7 @@ async function authSignUp() {
     options: { data: { name } }
   });
   btn.disabled = false; btn.textContent = 'Create Account';
-  if (error) { authMsg(error.message, true); return; }
+  if (error) { authMsg(friendlyAuthError(error.message), true); return; }
   if (data?.session?.user) {
     authModal(false);
     _updateNavAccount(data.session.user);
@@ -3482,7 +3503,7 @@ async function authSignIn() {
   btn.disabled = true; btn.textContent = 'Signing in…';
   const { data, error } = await _sb.auth.signInWithPassword({ email, password: pass });
   btn.disabled = false; btn.textContent = 'Sign In';
-  if (error) { authMsg(error.message, true); return; }
+  if (error) { authMsg(friendlyAuthError(error.message), true); return; }
   authModal(false);
   _updateNavAccount(data.user);
 }
