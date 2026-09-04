@@ -30,17 +30,16 @@
 
 <!-- ── NAV ─────────────────────────────────── -->
 <nav class="nav" role="navigation" aria-label="Main navigation">
-  <div class="nav-logo" onclick="go('home')" role="link" tabindex="0" aria-label="Spordo home">
-    <img src="/images/logo.png" style="height:48px;width:auto;">
+  <div class="nav-logo" onclick="go('home')" onkeydown="if(event.key==='Enter')go('home')" role="link" tabindex="0" aria-label="Spordo home">
+    <img src="/images/logo.png" alt="" style="height:48px;width:auto;">
     <span class="nav-logo-text">SPOR<span class="dot">DO</span></span>
   </div>
   <div class="nav-links">
-    <div class="nav-link active" data-view="home"    onclick="go('home')"    role="link" tabindex="0">Fields</div>
-    <div class="nav-link"        data-view="mission" onclick="go('mission')" role="link" tabindex="0">Mission</div>
-    <div class="nav-link"        data-view="waitlist" onclick="go('waitlist')" role="link" tabindex="0">Waitlist</div>
-    <div class="nav-link"        data-view="saved"   onclick="go('saved')"   role="link" tabindex="0">Saved</div>
-    <a class="nav-link" href="http://127.0.0.1:5001" target="_blank" rel="noopener" tabindex="0">Permits ↗</a>
-    <div class="nav-account-btn" id="nav-account-btn" onclick="authModal(true)" role="button" tabindex="0" aria-label="Sign in or manage account">Sign In</div>
+    <div class="nav-link active" data-view="home"    onclick="go('home')"    onkeydown="if(event.key==='Enter')go('home')"    role="link" tabindex="0">Fields</div>
+    <div class="nav-link"        data-view="mission" onclick="go('mission')" onkeydown="if(event.key==='Enter')go('mission')" role="link" tabindex="0">Mission</div>
+    <div class="nav-link"        data-view="waitlist" onclick="go('waitlist')" onkeydown="if(event.key==='Enter')go('waitlist')" role="link" tabindex="0">Waitlist</div>
+    <div class="nav-link"        data-view="saved"   onclick="go('saved')"   onkeydown="if(event.key==='Enter')go('saved')"   role="link" tabindex="0">Saved</div>
+    <div class="nav-account-btn" id="nav-account-btn" onclick="authModal(true)" onkeydown="if(event.key==='Enter')authModal(true)" role="button" tabindex="0" aria-label="Sign in or manage account">Sign In</div>
     <div class="nav-live" aria-live="polite">
       <span class="live-pulse" aria-hidden="true"></span>
       <span>Live</span>
@@ -59,19 +58,19 @@
       <button class="auth-tab active" data-tab="signin"  onclick="authTab('signin')">Sign In</button>
       <button class="auth-tab"        data-tab="signup"  onclick="authTab('signup')">Create Account</button>
     </div>
-    <div id="auth-msg" class="auth-msg" style="display:none"></div>
+    <div id="auth-msg" class="auth-msg" style="display:none" role="alert" aria-live="polite"></div>
     <!-- Sign In form -->
     <div id="auth-form-signin" style="display:flex;flex-direction:column;gap:12px">
-      <input id="auth-signin-email" class="auth-input" type="email"    placeholder="Email"    autocomplete="email">
-      <input id="auth-signin-pass"  class="auth-input" type="password" placeholder="Password" autocomplete="current-password"
+      <input id="auth-signin-email" class="auth-input" type="email"    placeholder="Email"    aria-label="Email"    autocomplete="email">
+      <input id="auth-signin-pass"  class="auth-input" type="password" placeholder="Password" aria-label="Password" autocomplete="current-password"
              onkeydown="if(event.key==='Enter')authSignIn()">
       <button id="auth-signin-btn" class="auth-btn" onclick="authSignIn()">Sign In</button>
     </div>
     <!-- Sign Up form -->
     <div id="auth-form-signup" style="display:none;flex-direction:column;gap:12px">
-      <input id="auth-signup-name"  class="auth-input" type="text"     placeholder="Your name"              autocomplete="name">
-      <input id="auth-signup-email" class="auth-input" type="email"    placeholder="Email"                  autocomplete="email">
-      <input id="auth-signup-pass"  class="auth-input" type="password" placeholder="Password (min 8 chars)" autocomplete="new-password"
+      <input id="auth-signup-name"  class="auth-input" type="text"     placeholder="Your name"              aria-label="Your name"                autocomplete="name">
+      <input id="auth-signup-email" class="auth-input" type="email"    placeholder="Email"                  aria-label="Email"                    autocomplete="email">
+      <input id="auth-signup-pass"  class="auth-input" type="password" placeholder="Password (min 8 chars)" aria-label="Password (min 8 chars)" autocomplete="new-password"
              onkeydown="if(event.key==='Enter')authSignUp()">
       <button id="auth-signup-btn"  class="auth-btn" onclick="authSignUp()">Create Account</button>
     </div>
@@ -121,7 +120,7 @@
       <h2 class="section-title">SELECT <span class="em">YOUR</span> SPORT</h2>
       <span class="section-kicker">8 Sports — 5 Boroughs</span>
     </div>
-    <div class="sport-grid" id="sport-grid" role="list"></div>
+    <div class="sport-grid" id="sport-grid"></div>
   </div>
 
   <footer class="footer">
@@ -206,9 +205,11 @@
       <div class="spin" aria-hidden="true"></div>
       <span>Pulling live permit data…</span>
     </div>
+    <div id="fv-sample-notice" class="fv-sample-notice" style="display:none" role="status">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Live permit data is unavailable right now — showing sample data so you can preview the app. Availability below is not real.</span>
+    </div>
     <div id="field-alpha-list"></div>
-    <!-- legacy id for any code that still targets field-grid -->
-    <div id="field-grid" style="display:none" aria-hidden="true"></div>
   </div>
 
   <footer class="footer">
@@ -469,16 +470,16 @@
     <div class="dv-faq-kicker">Questions</div>
     <h2 class="dv-faq-h2">THE HONEST ANSWERS</h2>
 
-    <div class="dv-faq-item" onclick="toggleFaq(this)">
-      <div class="dv-faq-q" role="button" aria-expanded="false">Is Spordo actually free to use? <span class="dv-faq-icon" aria-hidden="true"></span></div>
+    <div class="dv-faq-item">
+      <div class="dv-faq-q" role="button" tabindex="0" aria-expanded="false" onclick="toggleFaq(this)" onkeydown="if(event.key==='Enter')toggleFaq(this)">Is Spordo actually free to use? <span class="dv-faq-icon" aria-hidden="true"></span></div>
       <div class="dv-faq-a"><p>Yes, completely. No login, no subscription, no paywalled data. Every field, every permit status, every map view — free to anyone with a phone. That's not a marketing line. It's how we built it, and it's how we plan to keep it.</p></div>
     </div>
-    <div class="dv-faq-item" onclick="toggleFaq(this)">
-      <div class="dv-faq-q" role="button" aria-expanded="false">Where does my money actually go? <span class="dv-faq-icon" aria-hidden="true"></span></div>
+    <div class="dv-faq-item">
+      <div class="dv-faq-q" role="button" tabindex="0" aria-expanded="false" onclick="toggleFaq(this)" onkeydown="if(event.key==='Enter')toggleFaq(this)">Where does my money actually go? <span class="dv-faq-icon" aria-hidden="true"></span></div>
       <div class="dv-faq-a"><p>Server costs, map tile hosting, NYC Parks data access, and development time. We don't pay ourselves salaries from this. Spordo is a community project, and donations go toward keeping the infrastructure running and the data current.</p></div>
     </div>
-    <div class="dv-faq-item" onclick="toggleFaq(this)">
-      <div class="dv-faq-q" role="button" aria-expanded="false">Who built Spordo? <span class="dv-faq-icon" aria-hidden="true"></span></div>
+    <div class="dv-faq-item">
+      <div class="dv-faq-q" role="button" tabindex="0" aria-expanded="false" onclick="toggleFaq(this)" onkeydown="if(event.key==='Enter')toggleFaq(this)">Who built Spordo? <span class="dv-faq-icon" aria-hidden="true"></span></div>
       <div class="dv-faq-a"><p>A small team of New Yorkers who grew up playing in these parks. No venture funding, no corporate backing. We built this because we needed it — and because nobody else was building it for us.</p></div>
     </div>  </div>
 
@@ -524,13 +525,13 @@
       </div>
 
       <form class="gate-form" onsubmit="wvSubmit(event)">
-        <input class="gate-input" id="wv-name"  type="text"  placeholder="Your name"     autocomplete="given-name" required />
-        <input class="gate-input" id="wv-email" type="email" placeholder="Email address" autocomplete="email"      required />
+        <input class="gate-input" id="wv-name"  type="text"  placeholder="Your name"     aria-label="Your name"     autocomplete="given-name" required />
+        <input class="gate-input" id="wv-email" type="email" placeholder="Email address" aria-label="Email address" autocomplete="email"      required />
         <label class="gate-consent-row">
           <input type="checkbox" id="wv-consent" />
           <span class="gate-consent-txt">I agree to the <a onclick="go('legal'); event.preventDefault();" href="#">Terms of Service</a> and <a onclick="go('legal'); switchLegalView('pp'); event.preventDefault();" href="#">Privacy Policy</a>. I consent to receive updates about Spordo.</span>
         </label>
-        <span class="gate-consent-err" id="wv-consent-err">Please accept the terms to continue.</span>
+        <span class="gate-consent-err" id="wv-consent-err" role="alert" aria-live="polite">Please accept the terms to continue.</span>
         <button class="gate-submit-btn" id="wv-submit-btn" type="submit">Join Waitlist →</button>
       </form>
 
@@ -616,9 +617,9 @@
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 13.5l-5.5-5.3A3.5 3.5 0 0 1 8 3a3.5 3.5 0 0 1 5.5 5.2L8 13.5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
           SAVE
         </button>
-        <button class="schd-act-btn" onclick="share(S.activeField?.name||'')" aria-label="Share">
+        <button class="schd-act-btn" id="schd-share-btn" onclick="share(S.activeField?.name||'', this)" aria-label="Share">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 2l4 4-4 4M14 6H6a4 4 0 0 0-4 4v1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          SHARE
+          <span class="schd-share-label">SHARE</span>
         </button>
       </div>
     </div>
@@ -632,7 +633,7 @@
 <section class="view" id="view-legal" aria-label="Legal">
   <div class="lv-wrap">
     <div class="lv-header">
-      <button class="lv-back" onclick="if(window._gateWasOpen){window._gateWasOpen=false;document.getElementById('gate-overlay').style.zIndex='9998';go(S.prevView||'home')}else{go(S.prevView||'home')}" aria-label="Go back">
+      <button class="lv-back" onclick="go(S.prevView||'home')" aria-label="Go back">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M9 2L4 7l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Back
       </button>
@@ -1634,8 +1635,8 @@ async function _restoreFromUrlInner() {
   if (!parts.length) { go('home'); return; }
   const sport = SPORTS.find(s => s.id === parts[0]);
   if (!sport) {
-    // Non-sport top-level views (waitlist, saved) or an unknown path.
-    if (['waitlist', 'saved'].includes(parts[0])) go(parts[0]);
+    // Non-sport top-level views (waitlist, saved, mission, legal) or an unknown path.
+    if (['waitlist', 'saved', 'mission', 'legal'].includes(parts[0])) go(parts[0]);
     else go('home');
     return;
   }
@@ -1757,30 +1758,6 @@ function goToField(sportId, fieldName) {
   pickSport(sportId);
 }
 
-/* ── FIELD VIEW SEARCH ───────────────────────── */
-function onFieldSearch(val) {
-  S.fieldSearch = val;
-  const clr = document.getElementById('fv-search-clr');
-  if (clr) clr.classList.toggle('vis', !!val);
-  if (S.allRenderedFields.length) renderFields(S.allRenderedFields);
-}
-function clearFieldSearch() {
-  S.fieldSearch = '';
-  const inp = document.getElementById('fv-search-input');
-  const clr = document.getElementById('fv-search-clr');
-  if (inp) inp.value = '';
-  if (clr) clr.classList.remove('vis');
-  setFieldSearchCount(0, 0);
-  if (S.allRenderedFields.length) renderFields(S.allRenderedFields);
-}
-function setFieldSearchCount(shown, total) {
-  const el = document.getElementById('fv-search-count');
-  if (!el) return;
-  el.textContent = S.fieldSearch && total
-    ? `${shown} of ${total} field${total!==1?'s':''} match`
-    : '';
-}
-
 /* ── KEYBOARD: close hero search on Escape ── */
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && document.getElementById('hero-search').classList.contains('open')) {
@@ -1792,7 +1769,7 @@ document.addEventListener('keydown', e => {
 function renderSportGrid() {
   const g = document.getElementById('sport-grid');
   g.innerHTML = SPORTS.map((sp,i) => `
-    <div class="sport-card" role="listitem button" tabindex="0"
+    <div class="sport-card" role="button" tabindex="0"
          style="--sc-glow:${sp.glow};--sc-border:${sp.border};--sc-shadow:${sp.shadow};--sc-accent:${sp.accent};--sc-bg:var(--bg-${sp.id});animation-delay:${i*0.05}s"
          onclick="pickSport('${sp.id}')" onkeydown="if(event.key==='Enter')pickSport('${sp.id}')"
          aria-label="Browse ${sp.name} fields">
@@ -1845,13 +1822,6 @@ function pickSport(id) {
   // Update list title
   const lt = document.getElementById('fv-list-title');
   if (lt) lt.textContent = S.sport.name.toUpperCase() + ' FIELDS — A–Z';
-
-  // Sync field search bar
-  const inp = document.getElementById('fv-search-input');
-  const clr = document.getElementById('fv-search-clr');
-  if (inp) { inp.value = S.fieldSearch; }
-  if (clr) { clr.classList.toggle('vis', !!S.fieldSearch); }
-  setFieldSearchCount(0, 0);
 
   go('fields');
   // Initialize or reset the map
@@ -1941,8 +1911,10 @@ async function loadFields() {
   if (!S.sport) return;
   const loading  = document.getElementById('fv-loading');
   const listEl   = document.getElementById('field-alpha-list');
+  const sampleNotice = document.getElementById('fv-sample-notice');
   if (loading) loading.style.display = 'flex';
   if (listEl)  listEl.innerHTML = '';
+  if (sampleNotice) sampleNotice.style.display = 'none';
 
   try {
     // Sport + 90-day window filtering and pagination now happen
@@ -1966,6 +1938,7 @@ async function loadFields() {
     const merged = mergeDatabaseFields(base);
     renderFields(merged);
     loadMaintenanceFlags(merged);
+    if (sampleNotice) sampleNotice.style.display = 'flex';
   } finally {
     if (loading) loading.style.display = 'none';
   }
@@ -2414,9 +2387,16 @@ function addMapMarkers(fields) {
     // opens the in-app schedule, never an external site, so "BOOK AT HRPT"
     // is misleading. Other external orgs have no synced data (permits: []
     // always), so "BOOK AT X" is still accurate for them.
+    // "BOOK AT X" fields have no synced data of their own -- this button
+    // still opens our in-app schedule page first (same as every other
+    // CTA here), which then surfaces the real external booking link. The
+    // straight arrow used for CHECK AVAILABILITY/OPEN ACCESS implies
+    // "proceed in-app"; swap to ↗ for BOOK AT X so it reads as "this leads
+    // out to another site" without changing the click behavior itself.
+    const isBookExternal = f.external && f.orgShort !== 'HRPT' && f.accessType !== 'open_access';
     const availLabel = f.accessType === 'open_access'
       ? 'OPEN ACCESS'
-      : (f.external && f.orgShort !== 'HRPT' ? `BOOK AT ${orgLabel}` : 'CHECK AVAILABILITY');
+      : (isBookExternal ? `BOOK AT ${orgLabel}` : 'CHECK AVAILABILITY');
     const satUrl     = getFieldSatelliteUrl(coords[0], coords[1], 480, 200);
 
     const popupHtml = `
@@ -2446,7 +2426,9 @@ function addMapMarkers(fields) {
           </div>` : ''}
           <button class="mp-avail-btn" onclick="openSchedulePage('${esc(f.id)}')">
             ${availLabel}
-            <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M1.5 5.5h8M7 2l3 3.5L7 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            ${isBookExternal
+              ? `<span aria-hidden="true">↗</span>`
+              : `<svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true"><path d="M1.5 5.5h8M7 2l3 3.5L7 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
           </button>
         </div>
       </div>`;
@@ -2493,7 +2475,6 @@ function renderFields(fields) {
   const q = S.fieldSearch.toLowerCase().trim();
   const filtered = q ? fields.filter(f => f.name.toLowerCase().includes(q)) : fields;
 
-  setFieldSearchCount(filtered.length, fields.length);
   filtered.forEach(f => { S.fieldStore[f.id] = f; });
 
   // Update count label
@@ -2520,9 +2501,10 @@ function renderFields(fields) {
     const orgTag   = f.external
       ? `<span class="fa-org-tag">${esc(f.orgShort || 'External')}</span>`
       : '';
+    const isBookExternal = f.external && f.orgShort !== 'HRPT' && f.accessType !== 'open_access';
     const availLabel = f.accessType === 'open_access'
       ? 'OPEN ACCESS'
-      : (f.external && f.orgShort !== 'HRPT' ? `BOOK AT ${esc(f.orgShort || 'EXT')}` : 'CHECK AVAILABILITY');
+      : (isBookExternal ? `BOOK AT ${esc(f.orgShort || 'EXT')}` : 'CHECK AVAILABILITY');
     return `
     <div class="fa-row" onclick="openSchedulePage('${esc(f.id)}')"
          onkeydown="if(event.key==='Enter')openSchedulePage('${esc(f.id)}')" tabindex="0"
@@ -2544,7 +2526,9 @@ function renderFields(fields) {
       <button class="fa-avail-btn" onclick="event.stopPropagation();openSchedulePage('${esc(f.id)}')"
               aria-label="${availLabel} for ${esc(f.name)}">
         ${availLabel}
-        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="M1 5h8M6.5 2l3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        ${isBookExternal
+          ? `<span aria-hidden="true">↗</span>`
+          : `<svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="M1 5h8M6.5 2l3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
       </button>
     </div>`;
   }).join('');
@@ -3033,6 +3017,19 @@ function renderSaved() {
   renderFieldList('recent-list', S.recent, 'No recently viewed fields.');
 }
 
+// Saved/Recent entries only store {id, name, borough, addr, sport (display
+// name), ts} -- not a full field object -- and openSchedulePage() requires
+// the field to already be in S.fieldStore, which is only populated for
+// whatever sport is currently loaded. Same two-step (load that sport's
+// fields, then open) restoreFromUrl() already uses for a /:sport/field/:id
+// deep link -- reused here rather than inventing a second way to do it.
+async function openSavedField(fieldId, sportName) {
+  const sport = SPORTS.find(s => s.name === sportName);
+  if (!sport) return;
+  await pickSport(sport.id);
+  if (S.fieldStore[fieldId]) openSchedulePage(fieldId);
+}
+
 function renderFieldList(id, list, empty) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -3045,7 +3042,9 @@ function renderFieldList(id, list, empty) {
     const bl = BOROUGHS[f.borough]?.label || f.borough || 'NYC';
     const when = f.ts ? timeAgo(f.ts) : '';
     return `
-      <article class="fc" style="animation-delay:${i*0.05}s" role="listitem">
+      <article class="fc" style="animation-delay:${i*0.05}s" role="button" tabindex="0" aria-label="Open schedule for ${esc(f.name)}"
+        onclick="openSavedField('${esc(jsStr(f.id))}','${esc(jsStr(f.sport||''))}')"
+        onkeydown="if(event.key==='Enter')openSavedField('${esc(jsStr(f.id))}','${esc(jsStr(f.sport||''))}')">
         <div class="fc-top">
           <div class="fc-info">
             <div class="fc-borough" style="--bcolor:${bc}">
@@ -3116,10 +3115,14 @@ function setFreq(freq) {
   });
 }
 
-function toggleFaq(item) {
+// Called with the .dv-faq-q trigger element (it's the focusable/clickable
+// piece so keyboard users can reach it -- putting tabindex on the outer
+// .dv-faq-item instead would nest one interactive element inside another,
+// since .dv-faq-q already has to carry role="button" for its own label).
+function toggleFaq(q) {
+  const item = q.closest('.dv-faq-item');
   const isOpen = item.classList.contains('open');
   const answer = item.querySelector('.dv-faq-a');
-  const q = item.querySelector('.dv-faq-q');
   if (isOpen) {
     // Snap to measured height, then animate to 0
     answer.style.height = answer.scrollHeight + 'px';
@@ -3168,16 +3171,24 @@ function toggleFaq(item) {
 })();
 
 /* ── SHARE ──────────────────────────────────── */
-function share(name) {
+function share(name, btn) {
   const url  = window.location.href.split('#')[0];
   const text = `Check permit availability for ${name} on Spordo — NYC real-time field tracker`;
-  if (navigator.share) { navigator.share({title:'Spordo',text,url}).catch(()=>{}); }
-  else { navigator.clipboard.writeText(url).then(() => { /* silent */ }).catch(() => {}); }
+  if (navigator.share) { navigator.share({title:'Spordo',text,url}).catch(()=>{}); return; }
+  navigator.clipboard.writeText(url).then(() => {
+    // Same "Copied ✓" confirmation pattern used by the waitlist referral
+    // copy button (wvCopyRef) -- this used to swallow the confirmation
+    // entirely with no visible feedback that anything happened.
+    const label = btn?.querySelector('.schd-share-label');
+    if (label) {
+      const prev = label.textContent;
+      label.textContent = 'Copied ✓';
+      setTimeout(() => { label.textContent = prev; }, 2200);
+    }
+  }).catch(() => {});
 }
 
-/* ── GATE ─────────────────────────────────────── */
-const GATE_VISIT_KEY = 'spordo_gate_first_visit';
-const GATE_DAYS = 7;
+/* ── WAITLIST DATA (shared localStorage helpers + Loops) ─────── */
 const WL_KEY = 'spordo_waitlist';
 const WL_ME_KEY = 'spordo_wl_me';
 
@@ -3245,13 +3256,6 @@ function gateGenRefCode() {
   for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
   return code;
 }
-function gateMaskEmail(email) {
-  const [local, domain] = email.split('@');
-  return local.slice(0, 2) + '***@' + domain;
-}
-function gateEsc(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
 function gateGetRefLink(code) {
   return window.location.href.split('?')[0] + '?ref=' + code;
 }
@@ -3263,56 +3267,6 @@ function gateGetMyPosition() {
   return idx >= 0 ? idx + 1 : list.length;
 }
 
-function initGate() {
-  const now = Date.now();
-  let firstVisit = parseInt(localStorage.getItem(GATE_VISIT_KEY) || '0', 10);
-  if (!firstVisit) {
-    firstVisit = now;
-    localStorage.setItem(GATE_VISIT_KEY, String(firstVisit));
-  }
-  const unlockAt = firstVisit + GATE_DAYS * 24 * 60 * 60 * 1000;
-  if (now >= unlockAt) return false; // already unlocked
-
-  // Capture referral from URL
-  const refParam = new URLSearchParams(window.location.search).get('ref');
-  if (refParam) sessionStorage.setItem('spordo_ref', refParam);
-
-  const overlay = document.getElementById('gate-overlay');
-  overlay.classList.add('show');
-  const me = gateGetMe();
-  if (me) {
-    showGateConfirmed(me);
-  }
-  startGateCountdown(unlockAt);
-  return true; // gate is active
-}
-
-function startGateCountdown(unlockAt) {
-  const pad = n => String(n).padStart(2, '0');
-  function tick() {
-    const remaining = Math.max(0, unlockAt - Date.now());
-    if (remaining === 0) { unlockGate(); return; }
-    const d = Math.floor(remaining / 86400000);
-    const h = Math.floor((remaining % 86400000) / 3600000);
-    const m = Math.floor((remaining % 3600000) / 60000);
-    const s = Math.floor((remaining % 60000) / 1000);
-    // Update both countdown instances (signup + confirmed)
-    const prefixes = ['gcd', 'gcd2'];
-    prefixes.forEach(pfx => {
-      const dEl = document.getElementById(pfx + '-d');
-      const hEl = document.getElementById(pfx + '-h');
-      const mEl = document.getElementById(pfx + '-m');
-      const sEl = document.getElementById(pfx + '-s');
-      if (dEl) dEl.textContent = pad(d);
-      if (hEl) hEl.textContent = pad(h);
-      if (mEl) mEl.textContent = pad(m);
-      if (sEl) sEl.textContent = pad(s);
-    });
-  }
-  tick();
-  setInterval(tick, 1000);
-}
-
 /* ── WAITLIST VIEW logic ─────────────────────────── */
 function initWaitlistView() {
   const me = gateGetMe();
@@ -3322,7 +3276,7 @@ function initWaitlistView() {
     confirmed.style.display = 'flex';
     document.getElementById('wv-welcome-name').textContent = me.name + '.';
     document.getElementById('wv-pos-num').textContent = '#' + gateGetMyPosition(me);
-    document.getElementById('wv-ref-link').textContent = gateGetRefLink(me);
+    document.getElementById('wv-ref-link').textContent = gateGetRefLink(me.refCode);
   } else {
     document.getElementById('wv-signup-state').style.display = 'flex';
     document.getElementById('wv-confirmed-state').style.display = 'none';
@@ -3374,89 +3328,6 @@ function wvCopyRef() {
       if (btn) { btn.textContent = 'Copied ✓'; setTimeout(() => btn.textContent = 'Copy', 2200); }
     }).catch(() => {});
   }
-}
-
-async function gateSubmit(e) {
-  e.preventDefault();
-  const name = document.getElementById('gate-name').value.trim();
-  const email = document.getElementById('gate-email').value.trim().toLowerCase();
-  if (!name || !email) return;
-  const consentBox = document.getElementById('gate-consent');
-  const consentErr = document.getElementById('gate-consent-err');
-  if (!consentBox.checked) {
-    consentErr.classList.add('show');
-    consentBox.closest('.gate-consent-row').style.borderColor = '#f87171';
-    return;
-  }
-  consentErr.classList.remove('show');
-  const btn = document.getElementById('gate-submit-btn');
-  btn.textContent = 'Joining...'; btn.disabled = true;
-  const list = gateGetWaitlist();
-  const dup = list.find(x => x.email === email);
-  let entry;
-  if (dup) {
-    entry = dup;
-  } else {
-    const refCode = gateGenRefCode();
-    const referredBy = sessionStorage.getItem('spordo_ref') || null;
-    entry = { id: 'u'+Date.now(), name, email, refCode, referredBy, refs: 0, joinedAt: Date.now() };
-    if (referredBy) {
-      const idx = list.findIndex(x => x.refCode === referredBy);
-      if (idx >= 0) list[idx].refs = (list[idx].refs || 0) + 1;
-    }
-    list.push(entry);
-    gateSaveWaitlist(list);
-    sessionStorage.removeItem('spordo_ref');
-    loopsRegister(name, email); // fire-and-forget
-  }
-  gateSaveMe(entry);
-  showGateConfirmed(entry);
-}
-
-function showGateConfirmed(me) {
-  document.getElementById('gate-signup-state').style.display = 'none';
-  const confirmed = document.getElementById('gate-confirmed-state');
-  confirmed.style.display = 'flex';
-  document.getElementById('gate-welcome-name').textContent = me.name + '.';
-  const pos = gateGetMyPosition();
-  document.getElementById('gate-pos-num').textContent = '#' + pos;
-  const link = gateGetRefLink(me.refCode);
-  document.getElementById('gate-ref-link').textContent = link;
-  window._gateRefLink = link;
-}
-
-function gateCopyLink() {
-  const link = window._gateRefLink || '';
-  const done = () => {
-    const btn = document.querySelector('.gate-copy-btn');
-    if (btn) { btn.textContent = 'Copied ✓'; setTimeout(() => { btn.textContent = 'Copy'; }, 2200); }
-  };
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(link).then(done).catch(done);
-  } else {
-    const ta = document.createElement('textarea');
-    ta.value = link;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    done();
-  }
-}
-
-function unlockGate() {
-  const overlay = document.getElementById('gate-overlay');
-  overlay.classList.add('fade-out');
-  setTimeout(() => { overlay.classList.add('gone'); }, 750);
-}
-
-function openGateLegal(tab) {
-  // Temporarily lower gate z-index so legal view is visible
-  const gate = document.getElementById('gate-overlay');
-  gate.style.zIndex = '0';
-  window._gateWasOpen = true;
-  go('legal');
-  switchLegalView(tab || 'tos');
 }
 
 /* ── KEYBOARD ───────────────────────────────── */
@@ -3582,6 +3453,23 @@ function authMsg(msg, isErr) {
   el.style.display = msg ? 'block' : 'none';
 }
 
+// Supabase's own error.message strings were previously shown to users
+// verbatim -- raw technical copy ("Invalid login credentials") that breaks
+// tone with the rest of the app's voice and, for some cases, isn't
+// actionable as-is. Maps the handful of errors a real user will actually
+// hit to plain copy in the app's own voice; anything unrecognized falls
+// back to a generic message rather than leaking the raw string.
+function friendlyAuthError(message) {
+  const m = String(message || '').toLowerCase();
+  if (m.includes('invalid login credentials')) return "That email and password don't match. Double-check and try again.";
+  if (m.includes('already registered') || m.includes('already exists')) return 'An account with that email already exists — try signing in instead.';
+  if (m.includes('email not confirmed')) return 'Check your inbox to confirm your email before signing in.';
+  if (m.includes('rate limit')) return "Too many attempts — give it a minute and try again.";
+  if (m.includes('password')) return 'Password must be at least 8 characters.';
+  if (m.includes('email') && (m.includes('invalid') || m.includes('valid'))) return 'That doesn\'t look like a valid email address.';
+  return "Something went wrong on our end — give it another try.";
+}
+
 /* ── AUTH ACTIONS ────────────────────────────── */
 async function authSignUp() {
   const name  = document.getElementById('auth-signup-name').value.trim();
@@ -3597,7 +3485,7 @@ async function authSignUp() {
     options: { data: { name } }
   });
   btn.disabled = false; btn.textContent = 'Create Account';
-  if (error) { authMsg(error.message, true); return; }
+  if (error) { authMsg(friendlyAuthError(error.message), true); return; }
   if (data?.session?.user) {
     authModal(false);
     _updateNavAccount(data.session.user);
@@ -3615,7 +3503,7 @@ async function authSignIn() {
   btn.disabled = true; btn.textContent = 'Signing in…';
   const { data, error } = await _sb.auth.signInWithPassword({ email, password: pass });
   btn.disabled = false; btn.textContent = 'Sign In';
-  if (error) { authMsg(error.message, true); return; }
+  if (error) { authMsg(friendlyAuthError(error.message), true); return; }
   authModal(false);
   _updateNavAccount(data.user);
 }
