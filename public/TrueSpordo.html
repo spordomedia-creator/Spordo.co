@@ -958,15 +958,24 @@
 // groupByField()/mergeExternalFields() etc. below are unchanged.
 const PERMITS_API = '/api/permits';
 
+// Distinct per-sport accent colors -- previously every sport hardcoded the
+// same #62b4cf, making the --sc-*/--sport-accent theming infrastructure
+// below a no-op everywhere it was already wired in (the home sport tiles,
+// the schedule "today" highlight, the day-scrubber, active-permit chips).
+// Soccer keeps the original cyan since it's the app's base --c-accent and
+// the most common sport, so at least one tile still matches the app's
+// overall chrome. The rest are picked to stay visually distinct from both
+// each other and the 5 borough colors (violet/blue/amber/orange/teal) --
+// a first pass, not final production hex values.
 const SPORTS = [
-  { id:'soccer',     name:'Soccer',     icon:'⚽', accent:'#62b4cf', glow:'rgba(98,180,207,0.15)', border:'rgba(98,180,207,0.4)', shadow:'rgba(98,180,207,0.15)', query:'soccer'     },
-  { id:'baseball',   name:'Baseball',   icon:'⚾', accent:'#62b4cf', glow:'rgba(98,180,207,0.15)', border:'rgba(98,180,207,0.4)', shadow:'rgba(98,180,207,0.15)', query:'baseball'   },
-  { id:'basketball', name:'Basketball', icon:'🏀', accent:'#62b4cf', glow:'rgba(98,180,207,0.15)', border:'rgba(98,180,207,0.4)', shadow:'rgba(98,180,207,0.15)', query:'basketball' },
-  { id:'tennis',     name:'Tennis',     icon:'🎾', accent:'#62b4cf', glow:'rgba(98,180,207,0.15)', border:'rgba(98,180,207,0.4)', shadow:'rgba(98,180,207,0.15)', query:'tennis'     },
-  { id:'cricket',    name:'Cricket',    icon:'🏏', accent:'#62b4cf', glow:'rgba(98,180,207,0.15)', border:'rgba(98,180,207,0.4)', shadow:'rgba(98,180,207,0.15)', query:'cricket'    },
-  { id:'football',   name:'Football',   icon:'🏈', accent:'#62b4cf', glow:'rgba(98,180,207,0.15)', border:'rgba(98,180,207,0.4)', shadow:'rgba(98,180,207,0.15)', query:'football'   },
-  { id:'lacrosse',   name:'Lacrosse',   icon:'🥍', accent:'#62b4cf', glow:'rgba(98,180,207,0.15)', border:'rgba(98,180,207,0.4)', shadow:'rgba(98,180,207,0.15)', query:'lacrosse'   },
-  { id:'rugby',      name:'Rugby',      icon:'🏉', accent:'#62b4cf', glow:'rgba(98,180,207,0.15)', border:'rgba(98,180,207,0.4)', shadow:'rgba(98,180,207,0.15)', query:'rugby'      },
+  { id:'soccer',     name:'Soccer',     icon:'⚽', accent:'#62b4cf', glow:'rgba(98,180,207,0.15)',  border:'rgba(98,180,207,0.4)',  shadow:'rgba(98,180,207,0.15)',  query:'soccer'     },
+  { id:'baseball',   name:'Baseball',   icon:'⚾', accent:'#5FA052', glow:'rgba(95,160,82,0.15)',   border:'rgba(95,160,82,0.4)',   shadow:'rgba(95,160,82,0.15)',   query:'baseball'   },
+  { id:'basketball', name:'Basketball', icon:'🏀', accent:'#E4572E', glow:'rgba(228,87,46,0.15)',   border:'rgba(228,87,46,0.4)',   shadow:'rgba(228,87,46,0.15)',   query:'basketball' },
+  { id:'tennis',     name:'Tennis',     icon:'🎾', accent:'#B4C424', glow:'rgba(180,196,36,0.15)',  border:'rgba(180,196,36,0.4)',  shadow:'rgba(180,196,36,0.15)',  query:'tennis'     },
+  { id:'cricket',    name:'Cricket',    icon:'🏏', accent:'#B8926A', glow:'rgba(184,146,106,0.15)', border:'rgba(184,146,106,0.4)', shadow:'rgba(184,146,106,0.15)', query:'cricket'    },
+  { id:'football',   name:'Football',   icon:'🏈', accent:'#7386AD', glow:'rgba(115,134,173,0.15)', border:'rgba(115,134,173,0.4)', shadow:'rgba(115,134,173,0.15)', query:'football'   },
+  { id:'lacrosse',   name:'Lacrosse',   icon:'🥍', accent:'#D6409F', glow:'rgba(214,64,159,0.15)',  border:'rgba(214,64,159,0.4)',  shadow:'rgba(214,64,159,0.15)',  query:'lacrosse'   },
+  { id:'rugby',      name:'Rugby',      icon:'🏉', accent:'#A6495A', glow:'rgba(166,73,90,0.15)',   border:'rgba(166,73,90,0.4)',   shadow:'rgba(166,73,90,0.15)',   query:'rugby'      },
 ];
 
 const BOROUGHS = {
@@ -1811,6 +1820,14 @@ function pickSport(id) {
   S.sport   = SPORTS.find(s => s.id === id);
   S.borough = 'ALL';
   if (!S.sport) return;
+
+  // --sport-accent/--sport-accent-dim cascade from the root so the sport's
+  // color follows through into the schedule view (today's date highlight,
+  // the day-scrubber, active-permit chips) -- those already read this
+  // custom property with a var(--sport-accent, var(--c-accent)) fallback,
+  // it was just never actually set anywhere before this.
+  document.documentElement.style.setProperty('--sport-accent', S.sport.accent);
+  document.documentElement.style.setProperty('--sport-accent-dim', S.sport.glow);
 
   document.getElementById('fv-sport-name').textContent = S.sport.name.toUpperCase();
   document.querySelectorAll('.bchip').forEach(c => {
