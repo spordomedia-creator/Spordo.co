@@ -2252,8 +2252,14 @@ function initSpordoMap() {
     preferCanvas: true,
   });
 
-  // Dark tile layer — CartoDB Dark Matter (free, no key required)
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  // Dark tile layer — CartoDB Dark Matter. CARTO started requiring a free
+  // API key on basemaps.cartocdn.com (confirmed 2026-09-09 -- unauthenticated
+  // requests now render with a diagonal "API KEY REQUIRED" watermark instead
+  // of failing outright, which is what made this look like a live bug rather
+  // than a 4xx). Key is domain-restricted by CARTO (see the domain allowlist
+  // set when the key was requested), same public-by-design model as the
+  // Supabase anon key elsewhere in this file -- not a secret to hide.
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=cb1_343v_1_473406c928332418c804ef83', {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
     subdomains: 'abcd',
     maxZoom: 20,
