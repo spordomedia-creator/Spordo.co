@@ -96,10 +96,18 @@ function jsonResponse(body, status = 200, extraHeaders = {}) {
     status,
     headers: {
       "Content-Type": "application/json",
+      // Only cache successful responses. Cloudflare's edge respects
+      // Cache-Control on ANY response, including errors -- caching a 4xx/5xx
+      // here means a transient failure (e.g. a missing secret) gets served
+      // back to everyone requesting this sport for up to max-age after the
+      // underlying cause is already fixed, masking the recovery. Confirmed
+      // live (2026-09-13): after fixing a missing SUPABASE_SERVICE_ROLE_KEY
+      // and redeploying, some sports kept 500ing for several minutes purely
+      // because the earlier error response was still cached at the edge.
       // Cache is refreshed server-side every 3h (see wrangler.jsonc
-      // triggers.crons) -- a short client-side cache keeps repeat
-      // sport-switches cheap without serving noticeably stale data.
-      "Cache-Control": "public, max-age=300",
+      // triggers.crons) -- a short client-side cache on successes keeps
+      // repeat sport-switches cheap without serving noticeably stale data.
+      "Cache-Control": status >= 200 && status < 300 ? "public, max-age=300" : "no-store",
       ...extraHeaders,
     },
   });
