@@ -1,7 +1,7 @@
 {
   // https://developers.cloudflare.com/workers/wrangler/configuration/
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "spordo",
+  "name": "spordo-co",
   "main": "src/index.js",
   "compatibility_date": "2026-06-24",
   "observability": {
