@@ -7,6 +7,32 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#060608">
 <title>SPORDO — Know Before You Go</title>
+
+<!-- ── Discoverability: description, canonical, favicon, social cards ── -->
+<meta name="description" content="Real-time permit availability for NYC's public sports fields across all five boroughs — see which fields are open before you leave home.">
+<link rel="canonical" href="https://spordo.org/">
+
+<link rel="icon" type="image/png" href="/images/logo-small.png">
+<link rel="apple-touch-icon" href="/images/logo-small.png">
+
+<!-- Open Graph (Facebook, iMessage, Slack, LinkedIn…) -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="SPORDO">
+<meta property="og:title" content="SPORDO — Know Before You Go">
+<meta property="og:description" content="Real-time permit availability for NYC's public sports fields across all five boroughs. Know which fields are open, permitted, or flagged before you head out.">
+<meta property="og:url" content="https://spordo.org/">
+<meta property="og:image" content="https://spordo.org/images/og-image.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="SPORDO — NYC real-time field permit tracker">
+
+<!-- Twitter / X card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="SPORDO — Know Before You Go">
+<meta name="twitter:description" content="Real-time permit availability for NYC's public sports fields across all five boroughs. Know before you go.">
+<meta name="twitter:image" content="https://spordo.org/images/og-image.jpg">
+<meta name="twitter:image:alt" content="SPORDO — NYC real-time field permit tracker">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow+Condensed:wght@700;800&family=Bebas+Neue&family=Montserrat:wght@700;800;900&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -969,13 +995,7 @@ const PERMITS_API = '/api/permits';
 // a first pass, not final production hex values.
 const SPORTS = [
   { id:'soccer',     name:'Soccer',     icon:'⚽', accent:'#62b4cf', glow:'rgba(98,180,207,0.15)',  border:'rgba(98,180,207,0.4)',  shadow:'rgba(98,180,207,0.15)',  query:'soccer'     },
-  { id:'baseball',   name:'Baseball',   icon:'⚾', accent:'#5FA052', glow:'rgba(95,160,82,0.15)',   border:'rgba(95,160,82,0.4)',   shadow:'rgba(95,160,82,0.15)',   query:'baseball'   },
-  { id:'basketball', name:'Basketball', icon:'🏀', accent:'#E4572E', glow:'rgba(228,87,46,0.15)',   border:'rgba(228,87,46,0.4)',   shadow:'rgba(228,87,46,0.15)',   query:'basketball' },
-  { id:'tennis',     name:'Tennis',     icon:'🎾', accent:'#B4C424', glow:'rgba(180,196,36,0.15)',  border:'rgba(180,196,36,0.4)',  shadow:'rgba(180,196,36,0.15)',  query:'tennis'     },
-  { id:'cricket',    name:'Cricket',    icon:'🏏', accent:'#B8926A', glow:'rgba(184,146,106,0.15)', border:'rgba(184,146,106,0.4)', shadow:'rgba(184,146,106,0.15)', query:'cricket'    },
-  { id:'football',   name:'Football',   icon:'🏈', accent:'#7386AD', glow:'rgba(115,134,173,0.15)', border:'rgba(115,134,173,0.4)', shadow:'rgba(115,134,173,0.15)', query:'football'   },
-  { id:'lacrosse',   name:'Lacrosse',   icon:'🥍', accent:'#D6409F', glow:'rgba(214,64,159,0.15)',  border:'rgba(214,64,159,0.4)',  shadow:'rgba(214,64,159,0.15)',  query:'lacrosse'   },
-  { id:'rugby',      name:'Rugby',      icon:'🏉', accent:'#A6495A', glow:'rgba(166,73,90,0.15)',   border:'rgba(166,73,90,0.4)',   shadow:'rgba(166,73,90,0.15)',   query:'rugby'      },
+  // Only soccer is offered at launch — other sports intentionally removed from the picker.
 ];
 
 const BOROUGHS = {
