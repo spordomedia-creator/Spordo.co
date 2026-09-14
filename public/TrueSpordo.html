@@ -123,7 +123,7 @@
         <img src="/images/logo.png" style="height:200px;width:auto;">
       </div>
       <div class="hero-actions" style="flex-direction:column;align-items:center;gap:12px;">
-        <button class="btn-primary hero-fade-seq" onclick="openHeroSearch()">
+        <button class="btn-primary hero-fade-seq" onclick="pickSport('soccer')">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style="margin-right:6px;vertical-align:-2px"><circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" stroke-width="1.5"/><path d="M10 10l3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           CHECK A FIELD
         </button>
@@ -140,13 +140,6 @@
       <div class="hero-divider" aria-hidden="true"></div>
       <div class="hero-stat"><div class="hero-stat-num">Live</div><div class="hero-stat-label">Data</div></div>
     </div>
-  </div>
-  <div class="section" id="sport-anchor">
-    <div class="section-head">
-      <h2 class="section-title">SELECT <span class="em">YOUR</span> SPORT</h2>
-      <span class="section-kicker">8 Sports — 5 Boroughs</span>
-    </div>
-    <div class="sport-grid" id="sport-grid"></div>
   </div>
 
   <footer class="footer">
@@ -1797,6 +1790,7 @@ document.addEventListener('keydown', e => {
 /* ── SPORT GRID ─────────────────────────────── */
 function renderSportGrid() {
   const g = document.getElementById('sport-grid');
+  if (!g) return;   // sport picker removed (soccer-only launch); nothing to render
   g.innerHTML = SPORTS.map((sp,i) => `
     <div class="sport-card" role="button" tabindex="0"
          style="--sc-glow:${sp.glow};--sc-border:${sp.border};--sc-shadow:${sp.shadow};--sc-accent:${sp.accent};--sc-bg:var(--bg-${sp.id});animation-delay:${i*0.05}s"
