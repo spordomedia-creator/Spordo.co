@@ -2699,7 +2699,9 @@ footer { padding-bottom: calc(36px + var(--sab)); }
 /* ══════════════════════════════════════════════════
    Map pin marker (brand teardrop) + mobile bottom tab bar
    ══════════════════════════════════════════════════ */
-.smap-pin svg { display: block; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.55)); }
+.smap-pin { transition: transform 0.16s var(--ease-spring, ease); transform-origin: 50% 100%; cursor: pointer; }
+.smap-pin svg { display: block; filter: drop-shadow(0 3px 5px rgba(0,0,0,0.4)); }
+.smap-pin:hover { transform: scale(1.14); }
 
 /* Instagram-style bottom tab bar — phone only, hidden on desktop */
 .mobile-tabbar { display: none; }
