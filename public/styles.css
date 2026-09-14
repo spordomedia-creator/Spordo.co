@@ -2197,12 +2197,13 @@ body::after {
 }
 .footer-social-link {
   display: flex; align-items: center; justify-content: center;
-  width: 36px; height: 36px; border-radius: 10px;
-  background: var(--c-w06); border: 1px solid var(--c-w06);
-  color: var(--c-w50);
+  width: 38px; height: 38px; border-radius: 10px;
+  background: var(--c-w06); border: 1px solid var(--c-w12);
+  color: var(--c-white);
   transition: all 0.22s var(--ease-spring);
   text-decoration: none;
 }
+.footer-social-link svg { width: 21px; height: 21px; }
 .footer-social-link:hover {
   background: var(--c-accent-dim);
   border-color: rgba(98,180,207,0.3);
