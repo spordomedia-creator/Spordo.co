@@ -353,6 +353,8 @@ body::after {
 }
 .btn-primary:hover { transform: translateY(-3px) scale(1.02); box-shadow: 0 12px 40px rgba(98,180,207,0.4); }
 .btn-primary:hover::before { opacity: 0.08; }
+/* No hover glow on the hero "Check a field" button (keeps the lift, drops the shadow) */
+.hero-actions .btn-primary:hover { box-shadow: none; }
 .btn-ghost {
   display: flex; align-items: center; gap: 8px;
   font-family: var(--f-mono);
@@ -2693,3 +2695,39 @@ footer { padding-bottom: calc(36px + var(--sab)); }
 }
 .gate-footer-bar a { color: var(--c-w50); cursor: pointer; text-decoration: underline; }
 .gate-footer-bar a:hover { color: var(--c-accent); }
+
+/* ══════════════════════════════════════════════════
+   Map pin marker (brand teardrop) + mobile bottom tab bar
+   ══════════════════════════════════════════════════ */
+.smap-pin svg { display: block; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.55)); }
+
+/* Instagram-style bottom tab bar — phone only, hidden on desktop */
+.mobile-tabbar { display: none; }
+.mtab {
+  flex: 1;
+  display: flex; align-items: center; justify-content: center;
+  padding: 12px 0;
+  color: var(--c-w50);
+  cursor: pointer; text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.2s, transform 0.15s;
+}
+.mtab svg { width: 25px; height: 25px; }
+.mtab.active { color: var(--c-accent); }
+.mtab:active { transform: scale(0.9); }
+
+@media (max-width: 768px) {
+  /* Move primary navigation to the bottom bar on phones; desktop is untouched. */
+  .nav-links { display: none; }
+  .mobile-tabbar {
+    display: flex;
+    position: fixed; left: 0; right: 0; bottom: 0;
+    z-index: 800;
+    background: rgba(10,11,14,0.97);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    border-top: 1px solid var(--c-w12);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  /* Keep page content clear of the fixed bottom bar. */
+  body { padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px)); }
+}
