@@ -1881,6 +1881,7 @@ function mergeDatabaseFields(existingFields) {
 
 async function loadFields() {
   if (!S.sport) return;
+  await loadFieldCoordsIndex();   // ensure real per-field coordinates are ready before markers render
   const loading  = document.getElementById('fv-loading');
   const listEl   = document.getElementById('field-alpha-list');
   const sampleNotice = document.getElementById('fv-sample-notice');
@@ -2277,9 +2278,27 @@ function applyStableSpread([lat, lng], name) {
   return [lat + dx * spread, lng + dy * spread];
 }
 
+// Real per-field coordinates, generated from NYC Athletic Facilities (qnem-b8re)
+// + Parks Properties (enfh-gkve) by scripts/build-field-coords.mjs and served as
+// a static asset. Keyed by the exact field name groupByField() produces. Loaded
+// once (loadFields awaits it before rendering markers).
+let FIELD_COORDS_INDEX = null;
+let _fieldCoordsPromise = null;
+function loadFieldCoordsIndex() {
+  if (!_fieldCoordsPromise) {
+    _fieldCoordsPromise = fetch('/field-coords.json')
+      .then(r => (r.ok ? r.json() : {}))
+      .then(d => (FIELD_COORDS_INDEX = d))
+      .catch(() => (FIELD_COORDS_INDEX = {}));
+  }
+  return _fieldCoordsPromise;
+}
+
 function getFieldCoords(f) {
   // 0. Already enriched with exact coords during merge
   if (f._lat && f._lng) return [f._lat, f._lng];
+  // 0.5. Authoritative per-field coordinate index (NYC Athletic Facilities)
+  if (FIELD_COORDS_INDEX && FIELD_COORDS_INDEX[f.name]) return FIELD_COORDS_INDEX[f.name];
   // 1. Exact match in database (most accurate)
   const dbEntry = getDbEntry(f);
   if (dbEntry?.lat && dbEntry?.lng) return [dbEntry.lat, dbEntry.lng];
@@ -2324,12 +2343,9 @@ function getFieldCoords(f) {
     // footprint.
     return applyStableSpread([lat, lng], f.name);
   }
-  // 3. Jittered borough center fallback
-  const center = BOROUGH_CENTERS[f.borough] || [40.730, -73.935];
-  return [
-    center[0] + (Math.random() - 0.5) * 0.035,
-    center[1] + (Math.random() - 0.5) * 0.035,
-  ];
+  // 3. No known coordinate -> return null so the caller omits the pin entirely,
+  //    rather than dropping it at a random/fake borough-center location.
+  return null;
 }
 
 function addMapMarkers(fields) {
@@ -2340,6 +2356,7 @@ function addMapMarkers(fields) {
 
   fields.forEach(f => {
     const coords  = getFieldCoords(f);
+    if (!coords) return;   // no authoritative location -> omit rather than mis-place
     const stat    = fieldStatus(f.permits);
     const bInfo   = BOROUGHS[f.borough] || { color: '#62b4cf', label: f.borough || 'NYC' };
     const dotColor = f.external ? '#64748b' : (stat.cls === 'open' ? '#22c55e' : '#ef4444');
@@ -3370,6 +3387,7 @@ document.addEventListener('DOMContentLoaded', () => {
   restoreFromUrl();
   runIntroAnimation(false);
   initSupabase();
+  loadFieldCoordsIndex();   // prefetch the field coordinate index
 });
 
 /* ── 3D Card Tilt ── */
