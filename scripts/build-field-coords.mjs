@@ -25,11 +25,17 @@ const TODAY = new Date();
 const WINDOW_END = new Date(TODAY.getTime() + 120 * 864e5).toISOString().replace('Z', '');
 const WINDOW_START = new Date(TODAY.getTime() - 30 * 864e5).toISOString().replace('Z', '');
 
-async function soda(path, params) {
+async function soda(path, params, attempt = 0) {
   const url = `${SOCRATA}/${path}?${new URLSearchParams(params)}`;
-  const res = await fetch(url, { headers: { Accept: 'application/json' } });
-  if (!res.ok) throw new Error(`SODA ${path} HTTP ${res.status}: ${(await res.text()).slice(0,200)}`);
-  return res.json();
+  try {
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error(`SODA ${path} HTTP ${res.status}: ${(await res.text()).slice(0,200)}`);
+    return res.json();
+  } catch (e) {
+    if (attempt >= 4) throw e;
+    await new Promise(r => setTimeout(r, 1500 * (attempt + 1))); // back off on transient resets
+    return soda(path, params, attempt + 1);
+  }
 }
 
 // paginated fetch
@@ -119,14 +125,13 @@ async function main() {
   console.error(`  ${permitRows.length} permit rows -> ${fieldNames.size} distinct field names`);
 
   console.error('Fetching Parks Properties (enfh-gkve)…');
-  const parks = await sodaAll('enfh-gkve.json', { $select: 'gispropnum, signname, borough, multipolygon' });
-  // build normalized signname -> {gispropnum, centroid}
-  const parkByNorm = new Map();
-  const parkCentroid = new Map();
+  // No geometry here: the park polygon payload is huge and prone to connection
+  // resets, and it's only needed for a park centroid — which we derive from the
+  // park's athletic-facility centroids below instead.
+  const parks = await sodaAll('enfh-gkve.json', { $select: 'gispropnum, signname, borough' });
+  const parkByNorm = new Map();   // norm(signname) -> gispropnum
   for (const p of parks) {
     if (!p.gispropnum) continue;
-    const c = centroidOf(p.multipolygon);
-    if (c) parkCentroid.set(p.gispropnum, c);
     const key = normPark(p.signname);
     if (key && !parkByNorm.has(key)) parkByNorm.set(key, p.gispropnum);
   }
@@ -152,6 +157,7 @@ async function main() {
   const stat = { exact: 0, exactByNumber: 0, sportPark: 0, park: 0, none: 0 };
   const unresolved = [];
   const parkDiag = [];
+  const deferred = [];
   for (const name of fieldNames) {
     const { park, sport, fieldNo } = parseFieldName(name);
     // Candidate sports: the one in the name, plus every sport that actually has a
@@ -184,10 +190,31 @@ async function main() {
       const avg = facs.reduce((a, f) => [a[0]+f.centroid[0], a[1]+f.centroid[1]], [0,0]);
       hit = { centroid: [ +(avg[0]/facs.length).toFixed(6), +(avg[1]/facs.length).toFixed(6) ] }; tier = 'park';
     }
-    if (!hit && parkCentroid.has(gis)) { hit = { centroid: parkCentroid.get(gis) }; tier = 'park'; }
-    if (!hit) { stat.none++; continue; }
+    // gis matched but the park has no athletic facilities in qnem -> defer:
+    // we'll fetch just this park's polygon centroid in a small batched query.
+    if (!hit) { deferred.push({ name, gis }); continue; }
     coords[name] = hit.centroid;
     stat[tier]++;
+  }
+
+  // Second pass: park-polygon centroid for matched-but-facility-less parks.
+  // Fetching geometry only for these (vs. all ~2000 parks up front) keeps the
+  // payload small and avoids the connection resets the full geometry pull hits.
+  const needGis = [...new Set(deferred.map(d => d.gis))];
+  const centroidByGis = new Map();
+  console.error(`Fetching park polygons for ${needGis.length} facility-less parks…`);
+  for (let i = 0; i < needGis.length; i += 40) {
+    const chunk = needGis.slice(i, i + 40);
+    const rows = await soda('enfh-gkve.json', {
+      $select: 'gispropnum, multipolygon',
+      $where: `gispropnum in (${chunk.map(g => `'${g}'`).join(',')})`,
+      $limit: 200,
+    });
+    for (const r of rows) { const c = centroidOf(r.multipolygon); if (c) centroidByGis.set(r.gispropnum, c); }
+  }
+  for (const d of deferred) {
+    const c = centroidByGis.get(d.gis);
+    if (c) { coords[d.name] = c; stat.park++; } else { stat.none++; }
   }
 
   writeFileSync(new URL('../public/field-coords.json', import.meta.url), JSON.stringify(coords));
