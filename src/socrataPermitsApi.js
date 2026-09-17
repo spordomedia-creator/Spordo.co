@@ -45,9 +45,16 @@ async function handleSocrataPermitsRequest(env, { sport }, fetchImpl = fetch) {
     Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
   };
 
+  // Only return current + upcoming permits. The sync's window delete only clears
+  // [today, today+90], so rows for dates BEFORE today are never purged and pile
+  // up. Without this floor, the ascending-order + PostgREST row cap would return
+  // those stale past rows first and bury the fresh future data (observed live:
+  // the cache served weeks-old permits while thousands of current ones existed).
+  const todayIso = new Date().toISOString().split("T")[0];
   const permitsUrl =
     `${env.SUPABASE_URL}/rest/v1/${FIELD_PERMIT_CACHE_TABLE}` +
     `?source=eq.socrata&sport=eq.${encodeURIComponent(sport)}` +
+    `&start_date_time=gte.${encodeURIComponent(todayIso + "T00:00:00.000")}` +
     `&select=event_location,event_borough,start_date_time,end_date_time,event_name,event_type,permit_holder_name,organization` +
     `&order=start_date_time.asc&limit=${MAX_PERMITS_RETURNED}`;
 

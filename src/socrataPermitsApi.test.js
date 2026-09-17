@@ -23,9 +23,12 @@ test("returns 400 for a missing or unknown sport", async () => {
 
 test("returns cached permits for a known sport, in the same field-name shape the frontend already expects", async () => {
   const { fetchImpl, tables } = createFakeSupabaseRest();
+  const soon = new Date(Date.now() + 2 * 864e5).toISOString();      // upcoming — must appear
+  const past = new Date(Date.now() - 10 * 864e5).toISOString();     // before today — must be filtered out
   tables.field_permit_cache.push(
-    { source: "socrata", sport: "soccer", event_location: "Pier 40", event_borough: "MANHATTAN", start_date_time: "2026-08-22T09:00:00.000", end_date_time: "2026-08-22T11:00:00.000", event_name: "Soccer League", event_type: "Adult", permit_holder_name: "Jane", organization: "NYCFC" },
-    { source: "socrata", sport: "basketball", event_location: "Rucker Park", start_date_time: "2026-08-22T09:00:00.000" } // different sport, must not appear
+    { source: "socrata", sport: "soccer", event_location: "Pier 40", event_borough: "MANHATTAN", start_date_time: soon, end_date_time: soon, event_name: "Soccer League", event_type: "Adult", permit_holder_name: "Jane", organization: "NYCFC" },
+    { source: "socrata", sport: "soccer", event_location: "Old Field", event_borough: "MANHATTAN", start_date_time: past, event_name: "Past Soccer" }, // past — read returns only current/upcoming
+    { source: "socrata", sport: "basketball", event_location: "Rucker Park", start_date_time: soon } // different sport, must not appear
   );
   tables.field_sync_meta.push({ source: "socrata", scope: "sport:soccer", last_synced_at: new Date().toISOString(), status: "synced", rows_synced: 1, rows_dropped: 0 });
 
@@ -33,7 +36,7 @@ test("returns cached permits for a known sport, in the same field-name shape the
   assert.equal(resp.status, 200);
   assert.equal(resp.headers.get("Content-Type"), "application/json");
   const body = await resp.json();
-  assert.equal(body.length, 1);
+  assert.equal(body.length, 1);   // only the upcoming soccer permit; past + other-sport excluded
   assert.equal(body[0].event_location, "Pier 40");
   assert.equal(body[0].event_name, "Soccer League");
   assert.equal(resp.headers.get("X-Spordo-Stale"), "false");
