@@ -100,14 +100,20 @@ const normNum = (x) => (x == null ? null : String(parseInt(String(x), 10)));
 async function main() {
   console.error('Fetching distinct permit field names…');
   const permitRows = await sodaAll('tvpp-9vvx.json', {
-    $select: 'event_location, event_borough',
+    $select: 'event_location, event_borough, event_name',
     $where: `start_date_time>='${WINDOW_START}' AND start_date_time<='${WINDOW_END}' AND event_agency='Parks Department'`,
   });
-  // split comma-joined names exactly like the app's groupByField()
+  // split comma-joined names exactly like the app's groupByField(); also record
+  // which sports have permits at each location (from event_name) so we can resolve
+  // real fields whose event_location text doesn't itself contain the sport word.
   const fieldNames = new Set();
+  const nameToSports = new Map();
+  const sportFromText = (t) => { const l = String(t||'').toLowerCase(); for (const s of Object.keys(SPORT_COLS)) if (l.includes(s)) return s; return null; };
   for (const r of permitRows) {
+    const evSport = sportFromText(r.event_name);
     for (const nm of String(r.event_location || '').split(',').map(s => s.replace(/\s+/g,' ').trim()).filter(Boolean)) {
       fieldNames.add(nm);
+      if (evSport) { if (!nameToSports.has(nm)) nameToSports.set(nm, new Set()); nameToSports.get(nm).add(evSport); }
     }
   }
   console.error(`  ${permitRows.length} permit rows -> ${fieldNames.size} distinct field names`);
@@ -143,20 +149,37 @@ async function main() {
   console.error(`  ${facs.length} facilities across ${facByPark.size} parks`);
 
   const coords = {};
-  const stat = { exact: 0, sportPark: 0, park: 0, none: 0 };
+  const stat = { exact: 0, exactByNumber: 0, sportPark: 0, park: 0, none: 0 };
   const unresolved = [];
+  const parkDiag = [];
   for (const name of fieldNames) {
     const { park, sport, fieldNo } = parseFieldName(name);
+    // Candidate sports: the one in the name, plus every sport that actually has a
+    // permit at this location (from event_name) -- catches real fields whose text
+    // name omits the sport (e.g. "Randall's Island Park: Field 5").
+    const candSports = new Set(nameToSports.get(name) || []);
+    if (sport) candSports.add(sport);
     // try the whole park name, then each "/"-separated alias (e.g. "A Park / B Park")
     let gis = parkByNorm.get(normPark(park));
     if (!gis) for (const seg of park.split('/')) { gis = parkByNorm.get(normPark(seg)); if (gis) break; }
     if (!gis) { stat.none++; unresolved.push(park); continue; }
     const facs = facByPark.get(gis) || [];
     let hit = null, tier = null;
-    if (sport && fieldNo) hit = facs.find(f => f.sportsTrue.has(sport) && f.fieldNo === fieldNo);
+    // 1. exact: a facility of one of the candidate sports with this field_number
+    if (fieldNo && candSports.size) hit = facs.find(f => f.fieldNo === fieldNo && [...candSports].some(s => f.sportsTrue.has(s)));
     if (hit) tier = 'exact';
-    if (!hit && sport) { hit = facs.find(f => f.sportsTrue.has(sport)); if (hit) tier = 'sportPark'; }
+    // 2. field_number is unique in the park -> that's the field, even if the sport
+    //    flags disagree (qnem sport tagging is sometimes incomplete)
+    if (!hit && fieldNo) {
+      const byNo = facs.filter(f => f.fieldNo === fieldNo);
+      if (byNo.length === 1) { hit = byNo[0]; tier = 'exactByNumber'; }
+    }
+    // 3. any facility of a candidate sport (right sport, right park, unknown field #)
+    if (!hit && candSports.size) { hit = facs.find(f => [...candSports].some(s => f.sportsTrue.has(s))); if (hit) tier = 'sportPark'; }
     if (!hit && facs.length) {
+      if (process.env.DEBUG) parkDiag.push({ name, sport, fieldNo, candSports: [...candSports],
+        parkSports: [...new Set(facs.flatMap(f => [...f.sportsTrue]))],
+        parkFieldNos: facs.map(f => f.fieldNo).filter(Boolean) });
       // park centroid = average of its facility centroids
       const avg = facs.reduce((a, f) => [a[0]+f.centroid[0], a[1]+f.centroid[1]], [0,0]);
       hit = { centroid: [ +(avg[0]/facs.length).toFixed(6), +(avg[1]/facs.length).toFixed(6) ] }; tier = 'park';
@@ -169,17 +192,28 @@ async function main() {
 
   writeFileSync(new URL('../public/field-coords.json', import.meta.url), JSON.stringify(coords));
   const total = fieldNames.size;
-  const placed = stat.exact + stat.sportPark + stat.park;
+  const fieldLevel = stat.exact + stat.exactByNumber;
+  const placed = fieldLevel + stat.sportPark + stat.park;
   console.error(`\nDONE -> public/field-coords.json`);
-  console.error(`  exact field:   ${stat.exact}`);
-  console.error(`  sport-in-park: ${stat.sportPark}`);
-  console.error(`  park centroid: ${stat.park}`);
-  console.error(`  unresolved:    ${stat.none}`);
-  console.error(`  coverage:      ${placed}/${total} (${(100*placed/total).toFixed(1)}%) — unresolved get NO pin (not random)`);
+  console.error(`  exact field (sport+#):  ${stat.exact}`);
+  console.error(`  exact field (# unique): ${stat.exactByNumber}`);
+  console.error(`  sport-in-park:          ${stat.sportPark}`);
+  console.error(`  park centroid:          ${stat.park}`);
+  console.error(`  unresolved:             ${stat.none}`);
+  console.error(`  field-level total:      ${fieldLevel} (${(100*fieldLevel/total).toFixed(1)}%)`);
+  console.error(`  coverage:               ${placed}/${total} (${(100*placed/total).toFixed(1)}%) — unresolved get NO pin`);
   if (process.env.DEBUG) {
     const uniq = [...new Set(unresolved)].sort();
     console.error(`\nUNRESOLVED parks (${uniq.length}):`); uniq.slice(0,60).forEach(p => console.error('  · '+p));
-    console.error('\nEXACT samples:'); Object.entries(coords).slice(0,6).forEach(([n,c]) => console.error(`  ${n} -> ${c}`));
+    // Why did park-tier fields not reach field level?
+    const noSport = parkDiag.filter(d => !d.sport).length;
+    const sportMissingInPark = parkDiag.filter(d => d.sport && !d.parkSports.includes(d.sport)).length;
+    const fieldNoMissing = parkDiag.filter(d => d.sport && d.parkSports.includes(d.sport) && d.fieldNo && !d.parkFieldNos.includes(d.fieldNo)).length;
+    console.error(`\nPARK-TIER breakdown (${parkDiag.length}):`);
+    console.error(`  sport not parsed from name: ${noSport}`);
+    console.error(`  sport not present in park's facilities: ${sportMissingInPark}`);
+    console.error(`  sport present but field_number mismatch: ${fieldNoMissing}`);
+    console.error('  samples:'); parkDiag.slice(0,12).forEach(d => console.error(`    "${d.name}" sport=${d.sport} no=${d.fieldNo} | parkSports=[${d.parkSports}] fieldNos=[${d.parkFieldNos.slice(0,8)}]`));
   }
 }
 main().catch(e => { console.error(e); process.exit(1); });
