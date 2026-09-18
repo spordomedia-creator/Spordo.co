@@ -94,6 +94,11 @@ function createFakeD1({ failTables = [] } = {}) {
           const latest = rows.map((r) => r.permit_date).sort().at(-1) || null;
           return { latest_date: latest };
         }
+        // Single-row lookup of one field_sync_meta row by field_id (getSyncMetaRow).
+        if (/SELECT\s+field_id.*FROM\s+field_sync_meta\s+WHERE\s+field_id\s*=\s*\?/is.test(sql)) {
+          const [fieldId] = boundArgs;
+          return tables.field_sync_meta.find((r) => r.field_id === fieldId) || null;
+        }
         throw new Error(`fake D1 .first() does not recognize statement: ${sql}`);
       },
       // Exposed for batch(): batch() needs to run the same bound statement.
