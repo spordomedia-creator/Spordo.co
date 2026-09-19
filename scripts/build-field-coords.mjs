@@ -186,6 +186,7 @@ async function main() {
   const stat = { exact: 0, exactByNumber: 0, sportPark: 0, park: 0, none: 0, ambiguous: 0 };
   const unresolved = [];
   const ambiguous = [];
+  const tierByName = {};
   const parkDiag = [];
   const deferred = [];
   for (const name of fieldNames) {
@@ -241,6 +242,7 @@ async function main() {
     // we'll fetch just this park's polygon centroid in a small batched query.
     if (!hit) { deferred.push({ name, gis }); continue; }
     coords[name] = hit.centroid;
+    tierByName[name] = tier;
     stat[tier]++;
   }
 
@@ -261,10 +263,40 @@ async function main() {
   }
   for (const d of deferred) {
     const c = centroidByGis.get(d.gis);
-    if (c) { coords[d.name] = c; stat.park++; } else { stat.none++; }
+    if (c) { coords[d.name] = c; tierByName[d.name] = 'parkPolygon'; stat.park++; } else { stat.none++; }
   }
 
   writeFileSync(new URL('../public/field-coords.json', import.meta.url), JSON.stringify(coords));
+
+  // --report: how precisely each field was placed, which the map can't show on
+  // its own. Only the two "exact" tiers land on the field itself; "sportPark"
+  // is the right sport somewhere in the right park, and the two park tiers are
+  // the park's centre -- so those pins sit on whatever happens to be there
+  // (a lawn, a path, a building), which is what makes the satellite view look
+  // wrong. sharedWith counts other fields drawn at the identical point.
+  if (process.argv.includes('--report')) {
+    const byCoord = new Map();
+    for (const [n, c] of Object.entries(coords)) {
+      const k = c.join(',');
+      if (!byCoord.has(k)) byCoord.set(k, []);
+      byCoord.get(k).push(n);
+    }
+    const PRECISE = new Set(['exact', 'exactByNumber']);
+    const rows = Object.entries(coords).map(([name, c]) => ({
+      name, tier: tierByName[name] || 'unknown', coord: c,
+      sharedWith: byCoord.get(c.join(',')).length - 1,
+      precise: PRECISE.has(tierByName[name]),
+    })).sort((a, b) => (a.precise - b.precise) || (b.sharedWith - a.sharedWith) || a.name.localeCompare(b.name));
+    const out = new URL('../field-coords-report.json', import.meta.url);
+    writeFileSync(out, JSON.stringify({
+      generated: new Date().toISOString(),
+      total: rows.length,
+      imprecise: rows.filter(r => !r.precise).length,
+      unresolved: [...new Set(unresolved)].sort(),
+      fields: rows,
+    }, null, 2));
+    console.error(`\nReport -> field-coords-report.json (${rows.filter(r => !r.precise).length} imprecise of ${rows.length})`);
+  }
   const total = fieldNames.size;
   const fieldLevel = stat.exact + stat.exactByNumber;
   const placed = fieldLevel + stat.sportPark + stat.park;

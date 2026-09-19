@@ -32,3 +32,6 @@ Thumbs.db
 
 # Agent worktree scratch space
 .claude/worktrees/
+
+# Local diagnostic output from `build-field-coords.mjs --report`
+field-coords-report.json
