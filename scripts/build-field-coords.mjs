@@ -115,7 +115,10 @@ function parseFieldName(name) {
   const rest = name.slice(park.length + 1).toLowerCase();
   let sport = null;
   for (const s of Object.keys(SPORT_COLS)) if (rest.includes(s) || name.toLowerCase().includes(s)) { sport = s; break; }
-  const numMatch = rest.match(/(\d{1,3})\s*$/);
+  // Trailing letter is a sub-field suffix ("Soccer-01A"/"Soccer-01B" are the two
+  // halves of facility #1), so it must not stop the number from being read --
+  // requiring digits at the very end sent every such field to the park centroid.
+  const numMatch = rest.match(/(\d{1,3})\s*[a-z]?\s*$/i);
   const fieldNo = numMatch ? String(parseInt(numMatch[1], 10)) : null; // "05" -> "5"
   return { park, sport, fieldNo };
 }

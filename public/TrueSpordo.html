@@ -2101,6 +2101,22 @@ async function loadMaintenanceFlags(fields) {
   if (updated) renderFields(fields);
 }
 
+// Sports are matched by permit name (`event_name like '%SOCCER%'`), so a
+// "Youth Soccer Festival" booked on a picnic lawn arrives here looking like a
+// field. Those locations have no pitch to point at, so they can only ever draw
+// a park-centroid pin onto a barbecue area -- drop them instead of listing them.
+//
+// Only names that are NEVER a playing surface are matched. Lawn, meadow, oval,
+// hill, beach and green are deliberately absent: NYC Parks uses all of them for
+// real pitches (Central Park's "Great Lawn-Softball-05", Randall's Island's
+// "Sunken Meadow Fields-Soccer-44", "Williamsbridge Oval: Soccer-01"). Anything
+// naming a sport, field, court or diamond is kept regardless.
+const NON_FIELD_LOCATION = /(picnic|bbq|barbecue|parking lot|bandshell|fountain|amphitheater|pavilion|nature center|promenade|plaza|steps area|seating area|\bpath\b|landscape|whole park|entire park|comfort station|dog run|garden(?! fields)|carousel|boathouse)/i;
+const PLAYABLE_HINT = /(soccer|baseball|softball|football|basketball|tennis|handball|cricket|rugby|lacrosse|bocce|volleyball|track|diamond|\bcourt|\bfield)/i;
+function isNonFieldLocation(name) {
+  return NON_FIELD_LOCATION.test(name) && !PLAYABLE_HINT.test(name);
+}
+
 function groupByField(permits, borough) {
   const map = {};
   for (const p of permits) {
@@ -2117,6 +2133,7 @@ function groupByField(permits, borough) {
     // instead of one garbled combined name like "Field A ,Field B ,...".
     const names = String(rawName).split(',').map(s => s.replace(/\s+/g,' ').trim()).filter(Boolean);
     for (const name of names) {
+      if (isNonFieldLocation(name)) continue;
       const key = name + '|' + (bkey||'NYC');
       if (!map[key]) {
         map[key] = { id: encodeId(key), name, borough: bkey, addr: rawBoro, permits: [], mock: false };
