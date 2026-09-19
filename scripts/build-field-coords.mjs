@@ -78,6 +78,24 @@ function normPark(s) {
     .trim();
 }
 
+// normPark() strips "park"/"playground"/"recreation center", so genuinely
+// different parks can share a normalized name -- "Asser Levy Playground"
+// (Manhattan, E 23rd St) and "Asser Levy Park" (Brooklyn, Coney Island) both
+// reduce to "asser levy". Matching on name alone silently picked whichever
+// row Socrata returned first and placed Manhattan fields in Brooklyn, so the
+// park join is keyed by borough too.
+//
+// Handles both shapes the two datasets use: permits (tvpp-9vvx) give a full
+// name ("MANHATTAN"), parks properties (enfh-gkve) a single-letter code.
+const BORO_CODES = { manhattan:'M', brooklyn:'B', bronx:'X', queens:'Q', 'staten island':'R' };
+function normBoro(s) {
+  const v = String(s || '').toLowerCase().replace(/\bthe\b/g, '').replace(/\s+/g, ' ').trim();
+  if (!v) return null;
+  if (BORO_CODES[v]) return BORO_CODES[v];
+  const c = v.toUpperCase();
+  return 'MBXQR'.includes(c) && c.length === 1 ? c : null;
+}
+
 // sport keyword in a field name -> qnem boolean columns that count as that sport
 const SPORT_COLS = {
   soccer:     ['regulation_soccer', 'nonregulation_soccer'],
@@ -114,12 +132,15 @@ async function main() {
   // real fields whose event_location text doesn't itself contain the sport word.
   const fieldNames = new Set();
   const nameToSports = new Map();
+  const nameToBoros = new Map();
   const sportFromText = (t) => { const l = String(t||'').toLowerCase(); for (const s of Object.keys(SPORT_COLS)) if (l.includes(s)) return s; return null; };
   for (const r of permitRows) {
     const evSport = sportFromText(r.event_name);
+    const evBoro = normBoro(r.event_borough);
     for (const nm of String(r.event_location || '').split(',').map(s => s.replace(/\s+/g,' ').trim()).filter(Boolean)) {
       fieldNames.add(nm);
       if (evSport) { if (!nameToSports.has(nm)) nameToSports.set(nm, new Set()); nameToSports.get(nm).add(evSport); }
+      if (evBoro) { if (!nameToBoros.has(nm)) nameToBoros.set(nm, new Set()); nameToBoros.get(nm).add(evBoro); }
     }
   }
   console.error(`  ${permitRows.length} permit rows -> ${fieldNames.size} distinct field names`);
@@ -129,11 +150,19 @@ async function main() {
   // resets, and it's only needed for a park centroid — which we derive from the
   // park's athletic-facility centroids below instead.
   const parks = await sodaAll('enfh-gkve.json', { $select: 'gispropnum, signname, borough' });
-  const parkByNorm = new Map();   // norm(signname) -> gispropnum
+  const parkByBoroNorm = new Map();  // "M|norm(signname)" -> gispropnum
+  const gisByNorm = new Map();       // norm(signname) -> Set of gispropnum (ambiguity check)
   for (const p of parks) {
     if (!p.gispropnum) continue;
     const key = normPark(p.signname);
-    if (key && !parkByNorm.has(key)) parkByNorm.set(key, p.gispropnum);
+    if (!key) continue;
+    const boro = normBoro(p.borough);
+    if (boro) {
+      const bk = `${boro}|${key}`;
+      if (!parkByBoroNorm.has(bk)) parkByBoroNorm.set(bk, p.gispropnum);
+    }
+    if (!gisByNorm.has(key)) gisByNorm.set(key, new Set());
+    gisByNorm.get(key).add(p.gispropnum);
   }
   console.error(`  ${parks.length} parks`);
 
@@ -154,8 +183,9 @@ async function main() {
   console.error(`  ${facs.length} facilities across ${facByPark.size} parks`);
 
   const coords = {};
-  const stat = { exact: 0, exactByNumber: 0, sportPark: 0, park: 0, none: 0 };
+  const stat = { exact: 0, exactByNumber: 0, sportPark: 0, park: 0, none: 0, ambiguous: 0 };
   const unresolved = [];
+  const ambiguous = [];
   const parkDiag = [];
   const deferred = [];
   for (const name of fieldNames) {
@@ -165,9 +195,26 @@ async function main() {
     // name omits the sport (e.g. "Randall's Island Park: Field 5").
     const candSports = new Set(nameToSports.get(name) || []);
     if (sport) candSports.add(sport);
-    // try the whole park name, then each "/"-separated alias (e.g. "A Park / B Park")
-    let gis = parkByNorm.get(normPark(park));
-    if (!gis) for (const seg of park.split('/')) { gis = parkByNorm.get(normPark(seg)); if (gis) break; }
+    // try the whole park name, then each "/"-separated alias (e.g. "A Park / B Park"),
+    // each scoped to the borough the permit says this field is in.
+    const candBoros = nameToBoros.get(name) || new Set();
+    const nameVariants = [park, ...park.split('/')].map(normPark).filter(Boolean);
+    let gis = null;
+    for (const v of nameVariants) {
+      for (const b of candBoros) { gis = parkByBoroNorm.get(`${b}|${v}`); if (gis) break; }
+      if (gis) break;
+    }
+    // No borough-scoped hit (permit borough missing, or the park row carries a
+    // borough we couldn't normalize): fall back to the name alone, but ONLY when
+    // that name maps to exactly one park citywide. An ambiguous name with no
+    // borough to settle it gets no pin, rather than a coin-flip wrong one.
+    if (!gis) {
+      for (const v of nameVariants) {
+        const set = gisByNorm.get(v);
+        if (set?.size === 1) { gis = [...set][0]; break; }
+        if (set?.size > 1) { stat.ambiguous++; ambiguous.push({ name, variant: v, parks: set.size }); }
+      }
+    }
     if (!gis) { stat.none++; unresolved.push(park); continue; }
     const facs = facByPark.get(gis) || [];
     let hit = null, tier = null;
@@ -227,11 +274,16 @@ async function main() {
   console.error(`  sport-in-park:          ${stat.sportPark}`);
   console.error(`  park centroid:          ${stat.park}`);
   console.error(`  unresolved:             ${stat.none}`);
+  console.error(`  ambiguous name, no boro:${stat.ambiguous} (left unplaced on purpose)`);
   console.error(`  field-level total:      ${fieldLevel} (${(100*fieldLevel/total).toFixed(1)}%)`);
   console.error(`  coverage:               ${placed}/${total} (${(100*placed/total).toFixed(1)}%) — unresolved get NO pin`);
   if (process.env.DEBUG) {
     const uniq = [...new Set(unresolved)].sort();
     console.error(`\nUNRESOLVED parks (${uniq.length}):`); uniq.slice(0,60).forEach(p => console.error('  · '+p));
+    if (ambiguous.length) {
+      console.error(`\nAMBIGUOUS (${ambiguous.length}) — same normalized name in multiple parks, no usable borough:`);
+      ambiguous.slice(0,30).forEach(a => console.error(`  · "${a.name}" -> "${a.variant}" matches ${a.parks} parks`));
+    }
     // Why did park-tier fields not reach field level?
     const noSport = parkDiag.filter(d => !d.sport).length;
     const sportMissingInPark = parkDiag.filter(d => d.sport && !d.parkSports.includes(d.sport)).length;
