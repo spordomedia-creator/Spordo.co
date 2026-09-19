@@ -131,4 +131,18 @@ async function getFieldCoverage(env, { table, fieldIds }) {
   );
 }
 
-export { replaceFieldPermitWindow, upsertSyncMeta, getFieldCoverage };
+/**
+ * Read a single field_sync_meta row (or null). Used to fetch the stored HRPT
+ * image-manifest hash so a run can skip the vision read when nothing changed.
+ */
+async function getSyncMetaRow(env, { table, fieldId }) {
+  assertConfigured(env);
+  const row = await env.DB.prepare(
+    `SELECT field_id, last_permit_sync_at, live_availability_status, permit_source_url FROM ${table} WHERE field_id = ?`
+  )
+    .bind(fieldId)
+    .first();
+  return row || null;
+}
+
+export { replaceFieldPermitWindow, upsertSyncMeta, getFieldCoverage, getSyncMetaRow };
