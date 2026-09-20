@@ -1461,8 +1461,15 @@ const EXTERNAL_ORGS = [
   // in FIELD_DATABASE with genuine HRPT sync coverage: Pier 40 Courtyard
   // East/West Field, Pier 40 Indoor Field, Pier 40 Rooftop Field #1/#2,
   // and Gansevoort Peninsula Playing Field.
-  // Brooklyn Bridge Park
-  { name:'Pier 5 Soccer Field',         sport:'soccer',     borough:'BROOKLYN',  org:'Brooklyn Bridge Park',          orgShort:'BBP',   bookingUrl:'https://www.brooklynbridgepark.org/fields' },
+  // Brooklyn Bridge Park. BBP runs its own seasonal, recurring league-permit
+  // system and does NOT publish a bookable per-day schedule (confirmed on
+  // brooklynbridgepark.org/plan-your-visit/get-a-permit/athletic-permits/,
+  // 2026-09-20), so there's no feed to sync like HRPT's. Instead we surface
+  // their published open drop-in hours + how the seasonal permits work, with
+  // a disclaimer (see renderSchdBody). openPlay/operatorNote drive that card.
+  { name:'Pier 5 Soccer Field',         sport:'soccer',     borough:'BROOKLYN',  org:'Brooklyn Bridge Park',          orgShort:'BBP',   bookingUrl:'https://brooklynbridgepark.org/plan-your-visit/get-a-permit/athletic-permits/',
+    openPlay:'Daily · 6:00 AM – 11:00 PM',
+    operatorNote:"Open for public drop-in play (first-come, first-served) whenever leagues aren't scheduled — keep it to an hour when others are waiting. Seasonal league permits (Spring, Summer, Fall, Winter) can reserve times, but Brooklyn Bridge Park doesn't publish the league schedule." },
   // Randall's Island and Prospect Park fields are NOT independently
   // bookable -- verified via Perplexity research (2026-07): both
   // conservancies route permits through NYC Parks itself ("Athletic field
@@ -1998,6 +2005,8 @@ function mergeExternalFields(parksFields) {
       org: e.org,
       operator: e.org,
       accessType: e.accessType || null,
+      openPlay: e.openPlay || null,
+      operatorNote: e.operatorNote || null,
     }));
   // No cap here: mergeDatabaseFields() runs right after this and appends
   // its own fields uncapped, so slicing here only ever throws away real
@@ -2767,6 +2776,27 @@ function renderSchdBody() {
     // a request that will always come back empty.
     if (f.accessType === 'open_access') {
       el.innerHTML = `<div class="schd-week-none" style="padding:40px 0">Open play — no permit required (first-come, first-served)</div>` + footer;
+      return;
+    }
+
+    // Operators like Brooklyn Bridge Park run a seasonal, recurring league-
+    // permit system with no bookable per-day schedule to sync, but they DO
+    // publish open drop-in hours (see EXTERNAL_ORGS openPlay/operatorNote).
+    // Surface those plus how the seasonal permits work and an explicit
+    // "we don't have their live schedule" disclaimer, and skip the D1 fetch
+    // entirely -- there's never any synced data behind these fields.
+    if (f.openPlay || f.operatorNote) {
+      el.innerHTML = `<div class="schd-stale-notice schd-info-notice">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M10 9v4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <circle cx="10" cy="6.25" r="0.9" fill="currentColor"/>
+          </svg>
+          <div>
+            <div class="schd-stale-title">Open drop-in play${f.openPlay ? ` · ${esc(f.openPlay)}` : ''}</div>
+            <div class="schd-stale-detail">${f.operatorNote ? esc(f.operatorNote) + ' ' : ''}SPORDO doesn't have ${esc(f.orgShort)}'s live league schedule, so the field may be reserved during permitted times — check directly with ${esc(f.orgShort)}.${f.bookingUrl ? ` <a href="${esc(f.bookingUrl)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">Permit info →</a>` : ''}</div>
+          </div>
+        </div>` + footer;
       return;
     }
 
