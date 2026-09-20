@@ -1719,7 +1719,7 @@ function goToField(sportId, fieldName) {
   const entry = FIELD_DIRECTORY.find(f => f.sport === sportId && f.name === fieldName);
   S.fieldSearch = entry?.query || fieldName;
   closeHeroSearch();
-  pickSport(sportId);
+  pickSport(sportId, true); // keep the search filter we just set for the picked result
 }
 
 /* ── KEYBOARD: close hero search on Escape ── */
@@ -1772,10 +1772,17 @@ async function loadCounts() {
 }
 
 /* ── PICK SPORT ─────────────────────────────── */
-function pickSport(id) {
+function pickSport(id, keepSearch = false) {
   S.sport   = SPORTS.find(s => s.id === id);
   S.borough = 'ALL';
   if (!S.sport) return;
+
+  // Clear any field-name search left over from a previous visit, unless the
+  // caller is goToField() (which just set S.fieldSearch to focus the search
+  // result the user picked). Without this, entering the list any other way --
+  // the sport grid, "See all fields", a saved or deep-linked field -- would
+  // stay filtered to the last search (e.g. only "Pier 5" showing).
+  if (!keepSearch) S.fieldSearch = '';
 
   // --sport-accent/--sport-accent-dim cascade from the root so the sport's
   // color follows through into the schedule view (today's date highlight,
