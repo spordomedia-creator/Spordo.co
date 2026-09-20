@@ -19,6 +19,12 @@ test("resolves a known live-page alias to the current field_id", () => {
   assert.equal(result.fieldId, EXACT_NAME_TO_FIELD_ID["Gansevoort Peninsula Playing Field"]);
 });
 
+test("resolves the schedule IMAGE's shorter 'Gansevoort Athletic Field' title (no 'Peninsula')", () => {
+  const result = resolveFieldId("Gansevoort Athletic Field");
+  assert.equal(result.matchType, "alias");
+  assert.equal(result.fieldId, EXACT_NAME_TO_FIELD_ID["Gansevoort Peninsula Playing Field"]);
+});
+
 test("strips the live page's trailing 'Schedule' suffix before matching an exact name", () => {
   const result = resolveFieldId("Chelsea Waterside Athletic Field Schedule");
   assert.equal(result.matchType, "exact");
