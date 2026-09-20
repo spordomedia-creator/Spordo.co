@@ -42,8 +42,15 @@
   // availability actually changes) — see src/index.js `scheduled()` and
   // src/hrpt/sync.js. Adjust here if the cadence needs to change; it's the
   // only place the schedule is defined.
+  //
+  // HRPT and Socrata run on SEPARATE ticks (:00 vs :15), not the same one,
+  // so each gets its own Cloudflare per-invocation subrequest budget. The
+  // HRPT image+vision sync alone is ~19 subrequests on a changed week; when
+  // it shared a tick with Socrata's paginated fetches the two together blew
+  // past the 50-subrequest limit and the last field(s) failed to read. See
+  // src/index.js `scheduled()` — it dispatches by `event.cron`.
   "triggers": {
-    "crons": ["0 */3 * * *"]
+    "crons": ["0 */3 * * *", "15 */3 * * *"]
   },
   // D1 binding for the HRPT permit-sync pipeline (src/hrpt/d1Client.js,
   // src/hrpt/sync.js). D1 is reached at runtime via this binding

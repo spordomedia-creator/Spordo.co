@@ -82,6 +82,11 @@ const ALIASES = [
     note: "Live page says 'Athletic Field', DB says 'Playing Field' — assumed to be the same rename the other branch is fixing.",
   },
   {
+    pageName: "Gansevoort Athletic Field",
+    fieldId: EXACT_NAME_TO_FIELD_ID["Gansevoort Peninsula Playing Field"],
+    note: "Confirmed live (2026-09-20): the schedule IMAGE titles this field 'Gansevoort Athletic Field' (no 'Peninsula'), unlike the older page caption. Same physical field.",
+  },
+  {
     pageName: "Pier 25 Turf Field",
     fieldId: EXACT_NAME_TO_FIELD_ID["Pier 25 Artificial Turf Field"],
     note: "Live page's shorter name assumed to refer to the same field as our 'Artificial Turf Field'.",

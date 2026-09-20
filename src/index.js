@@ -77,7 +77,16 @@ export default {
   // sendSlackAlert no-ops instead of throwing, so a missing webhook never
   // breaks the sync run it would have reported on.
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(
+    // HRPT (:00) and Socrata (:15) run on separate cron ticks so each gets
+    // its own Cloudflare per-invocation subrequest budget (see the triggers
+    // note in wrangler.jsonc). A tick whose cron matches neither — e.g. a
+    // manual `--test-scheduled` hit with no ?cron= — runs both, which is
+    // fine for local testing.
+    const cron = event && event.cron;
+    const runHrpt = cron !== "15 */3 * * *";
+    const runSocrata = cron !== "0 */3 * * *";
+
+    if (runHrpt) ctx.waitUntil(
       runHrptSync(env).then(async (summary) => {
         if (!summary.ok) {
           console.error("[scheduled] HRPT sync did not complete successfully:", summary.reason, summary);
@@ -102,7 +111,7 @@ export default {
         }
       })
     );
-    ctx.waitUntil(
+    if (runSocrata) ctx.waitUntil(
       runSocrataSync(env).then(async (summary) => {
         if (!summary.ok) {
           console.error("[scheduled] Socrata sync did not complete successfully:", summary.reason, summary);
