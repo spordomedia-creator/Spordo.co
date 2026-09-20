@@ -2752,7 +2752,6 @@ function renderSchdBody() {
       : `<div class="schd-ext-footer">
           <span class="source-badge">${esc(f.orgShort)}</span>
           <div class="ext-note">Managed by <strong>${esc(f.operator)}</strong> — independent permit system outside NYC Parks.</div>
-          <a class="ext-book-btn" href="${esc(f.bookingUrl)}" target="_blank" rel="noopener">Book at ${esc(f.orgShort)} →</a>
         </div>`;
 
     // Open-access fields (e.g. NYCHA/DOE courts) have no permit data to
@@ -2793,9 +2792,6 @@ function renderSchdBody() {
     // misleading -- so replace it with an explicit, unmissable notice
     // instead of guessing.
     if (f._sourceStale) {
-      const latest = f._sourceLatestDate
-        ? new Date(f._sourceLatestDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-        : null;
       el.innerHTML = `<div class="schd-stale-notice">
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
             <path d="M10 2L1 17h18L10 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
@@ -2804,7 +2800,7 @@ function renderSchdBody() {
           </svg>
           <div>
             <div class="schd-stale-title">No current schedule available</div>
-            <div class="schd-stale-detail">${esc(f.orgShort)}'s own schedule page hasn't been updated${latest ? ` since ${esc(latest)}` : ''}. We won't guess at availability from out-of-date information — check directly with ${esc(f.orgShort)} below.</div>
+            <div class="schd-stale-detail">${esc(f.orgShort)} has not updated the permit schedule for the week yet. As soon as they do, it will be available right here.</div>
           </div>
         </div>` + footer;
       return;
@@ -2824,7 +2820,7 @@ function renderSchdBody() {
           </svg>
           <div>
             <div class="schd-stale-title">No live availability data</div>
-            <div class="schd-stale-detail">We don't have real-time schedule data for this field yet. We won't guess at availability — check directly with ${esc(f.orgShort)} below.</div>
+            <div class="schd-stale-detail">We don't have real-time schedule data for this field yet. We won't guess at availability — check directly with ${esc(f.orgShort)}.</div>
           </div>
         </div>` + footer;
       return;
