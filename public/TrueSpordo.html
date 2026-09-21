@@ -2870,8 +2870,8 @@ function renderSchdBody() {
             <circle cx="10" cy="6.25" r="0.9" fill="currentColor"/>
           </svg>
           <div>
-            <div class="schd-stale-title">${esc(f.orgShort)} ${esc(s.label)} turf schedule · ${fmtD(s.start)} – ${fmtD(s.end)}, ${esc(s.end.slice(0,4))}</div>
-            <div class="schd-stale-detail">Blocks below are when the turf's fields are <strong>booked</strong> by leagues/permits — open play is the remaining time (first-come, first-served). This is ${esc(f.org)}'s published seasonal pattern; it repeats weekly and can change for weather, maintenance, or events.${s.isPreview ? ` <strong>Note:</strong> this season has ended — showing the last published schedule until ${esc(f.orgShort)} posts the current one.` : ''} ${esc(f.orgShort)} has no live feed, so confirm directly with them.${f.bookingUrl ? ` <a href="${esc(f.bookingUrl)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">Permit info →</a>` : ''}</div>
+            <div class="schd-stale-title">Pier 5 open play schedule</div>
+            <div class="schd-stale-detail">Blocks below are when the turf's fields are <strong>booked</strong> by leagues/permits — open play is the remaining time (first-come, first-served). This is ${esc(f.org)}'s published ${esc(s.label)} pattern (${fmtD(s.start)} – ${fmtD(s.end)}); it repeats weekly and can change for weather, maintenance, or events.${s.isPreview ? ` <strong>Note:</strong> this season has ended — showing the last published schedule until ${esc(f.orgShort)} posts the current one.` : ''} ${esc(f.orgShort)} has no live feed.${f.bookingUrl ? ` <a href="${esc(f.bookingUrl)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">Permit info →</a>` : ''}</div>
           </div>
         </div>`;
       if (S.panelView === 'month') renderSchdMonth(f, banner, footer);
