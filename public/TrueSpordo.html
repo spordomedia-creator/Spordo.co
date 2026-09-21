@@ -1447,6 +1447,70 @@ const FIELD_DIRECTORY = [
   { name:'Bayswater Park',                sport:'soccer',     borough:'QUEENS',       note:'Far Rockaway · Beach Channel' },
 ];
 
+/* ── BROOKLYN BRIDGE PARK — PIER 5 TURF SEASONAL SCHEDULE ──────────────────
+ * BBP publishes a per-season Pier 5 turf schedule as a graphic (not a bookable
+ * data feed), showing when each of the 3 turf fields is IN USE by leagues /
+ * permits; open play is the remaining time (first-come, first-served). The same
+ * pattern repeats every week within the season's date range. Transcribed by
+ * hand each season from brooklynbridgepark.org/things-to-do/soccer/.
+ *
+ * `pattern` is keyed by weekday (0 = Sun … 6 = Sat); each entry is a list of
+ * booked blocks { name, from, to } with from/to as 24-hour hours. When BBP
+ * posts a new season, add another object to BBP_PIER5_SCHEDULES with its own
+ * start/end and pattern — resolveSeasonalSchedule() picks the one covering the
+ * current date, or falls back to the most recent as a labeled preview.
+ */
+const BBP_PIER5_SCHEDULES = [
+  {
+    label: 'Summer 2026',
+    start: '2026-06-01',
+    end:   '2026-08-31',
+    sourceUrl: 'https://brooklynbridgepark.org/things-to-do/soccer/',
+    pattern: {
+      0: [{ name: 'All fields', from: 8, to: 23 }],
+      1: [{ name: 'Field 1', from: 9, to: 10 }, { name: 'Field 1', from: 17, to: 23 }, { name: 'Field 2', from: 15, to: 23 }, { name: 'Field 3', from: 19, to: 23 }],
+      2: [{ name: 'Field 1', from: 16, to: 23 }, { name: 'Field 2', from: 16, to: 23 }, { name: 'Field 3', from: 16, to: 23 }],
+      3: [{ name: 'Field 1', from: 16, to: 23 }, { name: 'Field 2', from: 17, to: 23 }, { name: 'Field 3', from: 17, to: 23 }],
+      4: [{ name: 'Field 1', from: 9, to: 10 }, { name: 'Field 1', from: 18, to: 23 }, { name: 'Field 2', from: 16, to: 23 }, { name: 'Field 3', from: 18, to: 23 }],
+      5: [{ name: 'Field 1', from: 19, to: 23 }, { name: 'Field 2', from: 17, to: 23 }, { name: 'Field 3', from: 19, to: 23 }],
+      6: [{ name: 'All fields', from: 8, to: 23 }],
+    },
+  },
+];
+
+// Pick the schedule whose [start,end] contains todayIso; else the most recent
+// past one (flagged isPreview) so we still show something between seasons.
+function resolveSeasonalSchedule(schedules, todayIso) {
+  if (!schedules || !schedules.length) return null;
+  const active = schedules.find(s => todayIso >= s.start && todayIso <= s.end);
+  if (active) return { ...active, isPreview: false };
+  const past = schedules.filter(s => s.end < todayIso).sort((a, b) => b.end.localeCompare(a.end))[0];
+  const upcoming = [...schedules].sort((a, b) => a.start.localeCompare(b.start))[0];
+  const chosen = past || upcoming;
+  return chosen ? { ...chosen, isPreview: true } : null;
+}
+
+// Generate booked-permit objects (grid shape: start_date_time/end_date_time/
+// event_name) from a seasonal pattern for `numDays` days starting `fromDate`.
+// Date strings are built the same way the week/month grids compute theirs
+// (local midnight -> toISOString date) so permitDate() matches.
+function genSeasonalPermits(sched, fromDate, numDays) {
+  const out = [];
+  const base = new Date(fromDate); base.setHours(0, 0, 0, 0);
+  for (let i = 0; i < numDays; i++) {
+    const d = new Date(base); d.setDate(base.getDate() + i);
+    const ds = d.toISOString().split('T')[0];
+    for (const b of (sched.pattern[d.getDay()] || [])) {
+      out.push({
+        start_date_time: `${ds}T${String(b.from).padStart(2, '0')}:00:00.000`,
+        end_date_time:   `${ds}T${String(b.to).padStart(2, '0')}:00:00.000`,
+        event_name: b.name,
+      });
+    }
+  }
+  return out;
+}
+
 /* ── EXTERNAL (NON-PARKS) FIELDS ─────────────── */
 const EXTERNAL_ORGS = [
   // Hudson River Park Trust
@@ -1462,14 +1526,13 @@ const EXTERNAL_ORGS = [
   // East/West Field, Pier 40 Indoor Field, Pier 40 Rooftop Field #1/#2,
   // and Gansevoort Peninsula Playing Field.
   // Brooklyn Bridge Park. BBP runs its own seasonal, recurring league-permit
-  // system and does NOT publish a bookable per-day schedule (confirmed on
-  // brooklynbridgepark.org/plan-your-visit/get-a-permit/athletic-permits/,
-  // 2026-09-20), so there's no feed to sync like HRPT's. Instead we surface
-  // their published open drop-in hours + how the seasonal permits work, with
-  // a disclaimer (see renderSchdBody). openPlay/operatorNote drive that card.
+  // system with no bookable per-day feed, but it DOES publish a per-season
+  // Pier 5 turf schedule graphic (in-use blocks per field; open play is the
+  // gaps). We transcribe that into BBP_PIER5_SCHEDULES and render it as real
+  // booked blocks in the normal schedule grid (see renderSchdBody), with a
+  // season banner + disclaimer. `seasonalSchedules` drives that.
   { name:'Pier 5 Soccer Field',         sport:'soccer',     borough:'BROOKLYN',  org:'Brooklyn Bridge Park',          orgShort:'BBP',   bookingUrl:'https://brooklynbridgepark.org/plan-your-visit/get-a-permit/athletic-permits/',
-    openPlay:'Daily · 6:00 AM – 11:00 PM',
-    operatorNote:"Open for public drop-in play (first-come, first-served) whenever leagues aren't scheduled — keep it to an hour when others are waiting. Seasonal league permits (Spring, Summer, Fall, Winter) can reserve times, but Brooklyn Bridge Park doesn't publish the league schedule." },
+    seasonalSchedules:BBP_PIER5_SCHEDULES },
   // Randall's Island and Prospect Park fields are NOT independently
   // bookable -- verified via Perplexity research (2026-07): both
   // conservancies route permits through NYC Parks itself ("Athletic field
@@ -1992,22 +2055,36 @@ function mergeExternalFields(parksFields) {
         n.includes(eLow.split('—')[0].trim()) || eLow.includes(n.split(':')[0].trim())
       );
     })
-    .map(e => ({
-      id: encodeId(e.name + '|' + e.borough),
-      name: e.name,
-      borough: e.borough,
-      addr: e.org,
-      permits: [],
-      mock: false,
-      external: true,
-      orgShort: e.orgShort,
-      bookingUrl: e.bookingUrl,
-      org: e.org,
-      operator: e.org,
-      accessType: e.accessType || null,
-      openPlay: e.openPlay || null,
-      operatorNote: e.operatorNote || null,
-    }));
+    .map(e => {
+      // Fields backed by a published seasonal schedule (e.g. BBP Pier 5) get
+      // their booked blocks generated up front, so both the list status badge
+      // (fieldStatus reads .permits) and the schedule grid show real data
+      // instead of a fake "open". No D1/Socrata fetch for these.
+      const season = e.seasonalSchedules
+        ? resolveSeasonalSchedule(e.seasonalSchedules, new Date().toISOString().split('T')[0])
+        : null;
+      const permits = season
+        ? genSeasonalPermits(season, new Date(Date.now() - 14 * 86400000), 90)
+        : [];
+      return {
+        id: encodeId(e.name + '|' + e.borough),
+        name: e.name,
+        borough: e.borough,
+        addr: e.org,
+        permits,
+        mock: false,
+        external: true,
+        orgShort: e.orgShort,
+        bookingUrl: e.bookingUrl,
+        org: e.org,
+        operator: e.org,
+        accessType: e.accessType || null,
+        openPlay: e.openPlay || null,
+        operatorNote: e.operatorNote || null,
+        seasonalSchedule: season,
+        _permitsLoaded: !!season,
+      };
+    });
   // No cap here: mergeDatabaseFields() runs right after this and appends
   // its own fields uncapped, so slicing here only ever throws away real
   // parksFields entries (groupByField() already applies its own citywide
@@ -2776,6 +2853,29 @@ function renderSchdBody() {
     // a request that will always come back empty.
     if (f.accessType === 'open_access') {
       el.innerHTML = `<div class="schd-week-none" style="padding:40px 0">Open play — no permit required (first-come, first-served)</div>` + footer;
+      return;
+    }
+
+    // A published seasonal schedule (e.g. BBP Pier 5): render its booked
+    // blocks in the normal week/month grid, with a season banner + disclaimer
+    // above and the operator footer below. Permits were generated at merge
+    // time (see mergeExternalFields), so there's no fetch to do.
+    if (f.seasonalSchedule) {
+      const s = f.seasonalSchedule;
+      const fmtD = iso => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const banner = `<div class="schd-stale-notice schd-info-notice">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M10 9v4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <circle cx="10" cy="6.25" r="0.9" fill="currentColor"/>
+          </svg>
+          <div>
+            <div class="schd-stale-title">${esc(f.orgShort)} ${esc(s.label)} turf schedule · ${fmtD(s.start)} – ${fmtD(s.end)}, ${esc(s.end.slice(0,4))}</div>
+            <div class="schd-stale-detail">Blocks below are when the turf's fields are <strong>booked</strong> by leagues/permits — open play is the remaining time (first-come, first-served). This is ${esc(f.org)}'s published seasonal pattern; it repeats weekly and can change for weather, maintenance, or events.${s.isPreview ? ` <strong>Note:</strong> this season has ended — showing the last published schedule until ${esc(f.orgShort)} posts the current one.` : ''} ${esc(f.orgShort)} has no live feed, so confirm directly with them.${f.bookingUrl ? ` <a href="${esc(f.bookingUrl)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">Permit info →</a>` : ''}</div>
+          </div>
+        </div>`;
+      if (S.panelView === 'month') renderSchdMonth(f, banner, footer);
+      else renderSchdWeek(f, banner, footer);
       return;
     }
 
