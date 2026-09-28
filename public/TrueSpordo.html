@@ -106,6 +106,7 @@
       <input id="auth-signin-pass"  class="auth-input" type="password" placeholder="Password" aria-label="Password" autocomplete="current-password"
              onkeydown="if(event.key==='Enter')authSignIn()">
       <button id="auth-signin-btn" class="auth-btn" onclick="authSignIn()">Sign In</button>
+      <button type="button" class="auth-link" onclick="authTab('forgot')">Forgot password?</button>
     </div>
     <!-- Sign Up form -->
     <div id="auth-form-signup" style="display:none;flex-direction:column;gap:12px">
@@ -115,6 +116,42 @@
              onkeydown="if(event.key==='Enter')authSignUp()">
       <button id="auth-signup-btn"  class="auth-btn" onclick="authSignUp()">Create Account</button>
     </div>
+    <!-- Forgot password form -->
+    <div id="auth-form-forgot" style="display:none;flex-direction:column;gap:12px">
+      <p class="auth-sub">Enter your email and we'll send you a link to reset your password.</p>
+      <input id="auth-forgot-email" class="auth-input" type="email" placeholder="Email" aria-label="Email" autocomplete="email"
+             onkeydown="if(event.key==='Enter')authForgot()">
+      <button id="auth-forgot-btn" class="auth-btn" onclick="authForgot()">Send reset link</button>
+      <button type="button" class="auth-link" onclick="authTab('signin')">← Back to sign in</button>
+    </div>
+    <!-- Reset password form (opened from the emailed link) -->
+    <div id="auth-form-reset" style="display:none;flex-direction:column;gap:12px">
+      <p class="auth-sub">Choose a new password for your account.</p>
+      <input id="auth-reset-pass"  class="auth-input" type="password" placeholder="New password (min 8 chars)" aria-label="New password" autocomplete="new-password">
+      <input id="auth-reset-pass2" class="auth-input" type="password" placeholder="Confirm new password" aria-label="Confirm new password" autocomplete="new-password"
+             onkeydown="if(event.key==='Enter')authReset()">
+      <button id="auth-reset-btn" class="auth-btn" onclick="authReset()">Update password</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     ACCOUNT MODAL
+══════════════════════════════════════════ -->
+<div id="account-modal" role="dialog" aria-modal="true" aria-label="Your account">
+  <div class="auth-card">
+    <button class="auth-close" onclick="accountModal(false)" aria-label="Close">✕</button>
+    <div class="acct-head">
+      <span id="acct-avatar" class="nav-account-avatar" style="width:44px;height:44px;font-size:20px"></span>
+      <div>
+        <div id="acct-name" class="acct-name"></div>
+        <div id="acct-email" class="acct-email"></div>
+      </div>
+    </div>
+    <div id="acct-verify-row"></div>
+    <div id="account-msg" class="auth-msg" style="display:none" role="alert" aria-live="polite"></div>
+    <button class="auth-btn secondary" onclick="authSignOut()">Sign out</button>
+    <button class="auth-btn secondary" onclick="signOutAll()">Sign out of all devices</button>
   </div>
 </div>
 
@@ -3581,15 +3618,22 @@ const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
 /* ── AUTH MODAL CONTROL ──────────────────────── */
-function authModal(open) {
+function authModal(open, tab = 'signin') {
   const el = document.getElementById('auth-modal');
-  if (open) { el.classList.add('show'); authTab('signin'); authMsg(''); }
+  if (open) { el.classList.add('show'); authTab(tab); authMsg(''); }
   else       el.classList.remove('show');
 }
 
 function authTab(tab) {
-  document.getElementById('auth-form-signup').style.display = tab === 'signup' ? 'flex' : 'none';
-  document.getElementById('auth-form-signin').style.display = tab === 'signin' ? 'flex' : 'none';
+  const forms = { signin: 'auth-form-signin', signup: 'auth-form-signup', forgot: 'auth-form-forgot', reset: 'auth-form-reset' };
+  Object.entries(forms).forEach(([k, id]) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = (k === tab) ? 'flex' : 'none';
+  });
+  // The Sign In / Create Account tab row only applies to those two modes;
+  // hide it for the forgot / reset flows (both reached from links, not tabs).
+  const tabsRow = document.querySelector('#auth-modal .auth-tabs');
+  if (tabsRow) tabsRow.style.display = (tab === 'signin' || tab === 'signup') ? 'flex' : 'none';
   document.querySelectorAll('.auth-tab').forEach(t =>
     t.classList.toggle('active', t.dataset.tab === tab)
   );
@@ -3658,8 +3702,83 @@ async function authSignIn() {
   _updateNavAccount(data.user);
 }
 
+// Send a Supabase password-reset email. The emailed link returns the user to
+// this origin; supabase-js detects the recovery token and fires a
+// PASSWORD_RECOVERY auth event (see initSupabase), which opens the reset form.
+async function authForgot() {
+  const email = document.getElementById('auth-forgot-email').value.trim();
+  if (!email) { authMsg('Please enter your email.', true); return; }
+  const btn = document.getElementById('auth-forgot-btn');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  const { error } = await _sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + '/' });
+  btn.disabled = false; btn.textContent = 'Send reset link';
+  // Don't reveal whether the email exists — answer the same either way.
+  if (error && !/rate limit/i.test(error.message)) { authMsg(friendlyAuthError(error.message), true); return; }
+  if (error) { authMsg(friendlyAuthError(error.message), true); return; }
+  authMsg('If an account exists for that email, a reset link is on its way — check your inbox.', false);
+}
+
+// Set a new password. Only reachable while a recovery session is active (the
+// user arrived via the emailed link), so updateUser applies to that account.
+async function authReset() {
+  const p1 = document.getElementById('auth-reset-pass').value;
+  const p2 = document.getElementById('auth-reset-pass2').value;
+  if (p1.length < 8)  { authMsg('Password must be at least 8 characters.', true); return; }
+  if (p1 !== p2)      { authMsg("Those passwords don't match.", true); return; }
+  const btn = document.getElementById('auth-reset-btn');
+  btn.disabled = true; btn.textContent = 'Updating…';
+  const { error } = await _sb.auth.updateUser({ password: p1 });
+  btn.disabled = false; btn.textContent = 'Update password';
+  if (error) { authMsg(friendlyAuthError(error.message), true); return; }
+  authMsg("Password updated — you're signed in.", false);
+  setTimeout(() => authModal(false), 1400);
+}
+
 async function authSignOut() {
   await _sb.auth.signOut();
+  accountModal(false);
+  _updateNavAccount(null);
+}
+
+/* ── ACCOUNT PANEL ───────────────────────────── */
+function accountModal(open) {
+  const el = document.getElementById('account-modal');
+  if (!el) return;
+  if (open) { accountMsg(''); _renderAccount(S.user); el.classList.add('show'); }
+  else        el.classList.remove('show');
+}
+
+function accountMsg(msg, isErr) {
+  const el = document.getElementById('account-msg');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'auth-msg ' + (isErr ? 'error' : 'success');
+  el.style.display = msg ? 'block' : 'none';
+}
+
+function _renderAccount(user) {
+  if (!user) return;
+  const name = user.user_metadata?.name || user.email || '';
+  document.getElementById('acct-avatar').textContent = (name.charAt(0) || '?').toUpperCase();
+  document.getElementById('acct-name').textContent = name;
+  document.getElementById('acct-email').textContent = user.email || '';
+  const verified = !!(user.email_confirmed_at || user.confirmed_at);
+  const row = document.getElementById('acct-verify-row');
+  row.innerHTML = verified
+    ? `<div class="acct-verified">✓ Email verified</div>`
+    : `<div class="acct-unverified">Email not verified — <button type="button" class="auth-link" onclick="resendVerification()">Resend confirmation</button></div>`;
+}
+
+async function resendVerification() {
+  if (!S.user?.email) return;
+  const { error } = await _sb.auth.resend({ type: 'signup', email: S.user.email });
+  accountMsg(error ? friendlyAuthError(error.message) : 'Confirmation email sent — check your inbox.', !!error);
+}
+
+// Revoke every session for this account across all devices, not just this one.
+async function signOutAll() {
+  await _sb.auth.signOut({ scope: 'global' });
+  accountModal(false);
   _updateNavAccount(null);
 }
 
@@ -3673,7 +3792,7 @@ function _updateNavAccount(user) {
     const initial = name.charAt(0).toUpperCase();
     btn.innerHTML = `<span class="nav-account-avatar">${initial}</span>`;
     btn.title     = name;
-    btn.onclick   = () => { if (confirm('Sign out of SPORDO?')) authSignOut(); };
+    btn.onclick   = () => accountModal(true);
   } else {
     btn.innerHTML = 'Sign In';
     btn.title     = '';
@@ -3686,8 +3805,16 @@ async function initSupabase() {
   if (SUPABASE_URL.startsWith('REPLACE')) return; // not configured yet
   const { data: { session } } = await _sb.auth.getSession();
   if (session?.user) _updateNavAccount(session.user);
-  _sb.auth.onAuthStateChange((_event, session) => {
+  _sb.auth.onAuthStateChange((event, session) => {
     _updateNavAccount(session?.user ?? null);
+    // Arriving via a password-reset email: supabase-js parses the recovery
+    // token from the URL and fires this. Open the modal straight to the
+    // "set a new password" form.
+    if (event === 'PASSWORD_RECOVERY') authModal(true, 'reset');
+    // Keep an open account panel in sync (e.g. email just got verified).
+    if (document.getElementById('account-modal')?.classList.contains('show') && session?.user) {
+      _renderAccount(session.user);
+    }
   });
 }
 

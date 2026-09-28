@@ -2443,13 +2443,13 @@ footer { padding-bottom: calc(36px + var(--sab)); }
 .permit-source-link:hover { text-decoration: underline; }
 
 /* ── AUTH MODAL ─────────────────────────────────── */
-#auth-modal {
+#auth-modal, #account-modal {
   display: none; position: fixed; inset: 0; z-index: 9500;
   background: rgba(6,6,8,0.88); backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   align-items: center; justify-content: center; padding: 20px;
 }
-#auth-modal.show { display: flex; }
+#auth-modal.show, #account-modal.show { display: flex; }
 .auth-card {
   width: 100%; max-width: 420px; background: #0e0e12;
   border: 1px solid var(--c-w12); border-radius: 20px;
@@ -2512,6 +2512,36 @@ footer { padding-bottom: calc(36px + var(--sab)); }
   font-family: var(--f-mono); font-size: 11px; font-weight: 700;
   display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
+
+/* ── AUTH: forgot / reset / account extras ─────── */
+.auth-sub {
+  font-family: var(--f-body); font-size: 13px; color: var(--c-w50);
+  line-height: 1.5; margin: 0;
+}
+.auth-link {
+  background: none; border: none; color: var(--c-accent); cursor: pointer;
+  font-family: var(--f-body); font-size: 13px; padding: 2px 4px; align-self: center;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.auth-link:hover { opacity: 0.85; }
+.auth-btn.secondary {
+  background: none; border: 1px solid var(--c-w12); color: #fff;
+}
+.auth-btn.secondary:hover { background: var(--c-w06); opacity: 1; }
+.acct-head { display: flex; align-items: center; gap: 14px; }
+.acct-name { font-family: var(--f-body); font-weight: 700; font-size: 16px; color: #fff; }
+.acct-email { font-family: var(--f-body); font-size: 13px; color: var(--c-w50); word-break: break-all; }
+.acct-verified {
+  font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--c-accent); background: var(--c-accent-dim); border: 1px solid var(--c-accent-glow);
+  border-radius: 8px; padding: 8px 12px;
+}
+.acct-unverified {
+  font-family: var(--f-body); font-size: 13px; color: #f8b671;
+  background: rgba(239,168,68,0.10); border: 1px solid rgba(239,168,68,0.22);
+  border-radius: 8px; padding: 10px 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+}
+.acct-unverified .auth-link { align-self: auto; color: #f8b671; }
 
 /* ── GATE OVERLAY ─────────────────────────────── */
 #gate-overlay {
