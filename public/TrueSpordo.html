@@ -3812,26 +3812,26 @@ function _updateNavAccount(user) {
 /* ── SUPABASE INIT ───────────────────────────── */
 async function initSupabase() {
   if (SUPABASE_URL.startsWith('REPLACE')) return; // not configured yet
-  // Register the listener BEFORE any await so we don't miss PASSWORD_RECOVERY.
+  // If the page was opened from a password-reset email, show the reset form
+  // right away — BEFORE any await, and independent of session resolution
+  // (getSession can reject on a malformed/expired link, which would otherwise
+  // skip everything after it). By the time the user submits a new password,
+  // supabase-js has established the recovery session, so authReset()'s
+  // updateUser() applies to the right account. The PASSWORD_RECOVERY event
+  // below is a second path to the same thing.
+  if (_spordoRecoveryLink) authModal(true, 'reset');
   _sb.auth.onAuthStateChange((event, session) => {
     _updateNavAccount(session?.user ?? null);
-    // Arriving via a password-reset email: supabase-js parses the recovery
-    // token from the URL and fires this. Open the modal straight to the
-    // "set a new password" form.
     if (event === 'PASSWORD_RECOVERY') authModal(true, 'reset');
     // Keep an open account panel in sync (e.g. email just got verified).
     if (document.getElementById('account-modal')?.classList.contains('show') && session?.user) {
       _renderAccount(session.user);
     }
   });
-  const { data: { session } } = await _sb.auth.getSession();
-  if (session?.user) _updateNavAccount(session.user);
-  // Fallback: the PASSWORD_RECOVERY event may have fired before the listener
-  // above was attached (supabase-js processes the URL during construction), so
-  // open the reset form from the flag we captured synchronously at load. By
-  // now getSession() has resolved the recovery session, so authReset()'s
-  // updateUser() will apply the new password to the right account.
-  if (_spordoRecoveryLink) authModal(true, 'reset');
+  try {
+    const { data: { session } } = await _sb.auth.getSession();
+    if (session?.user) _updateNavAccount(session.user);
+  } catch (e) { /* non-fatal — a bad recovery link shouldn't break init */ }
 }
 
 /* ── PERMIT INFO ─────────────────────────────────── */
