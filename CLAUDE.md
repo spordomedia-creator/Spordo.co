@@ -2,7 +2,14 @@
 
 ## What this is
 
-SPORDO — NYC sports-field & court permit-availability tracker ("Know Before You Go"). Currently a single-file prototype (`public/TrueSpordo.html`, ~3.4MB, inlined CSS/JS/images, 137-entry `FIELD_DATABASE`) served as a Cloudflare Worker. Being migrated to production incrementally — see the `spordo-architecture` skill for the target stack and build-out order before making structural decisions.
+SPORDO — NYC sports-field & court permit-availability tracker ("Know Before You Go"). The frontend is `public/TrueSpordo.html` (~310KB HTML with inline JS; **CSS is external in `public/styles.css`, images external in `public/images/`**), served as a Cloudflare Worker via Workers Static Assets (`./public`). 137-entry `FIELD_DATABASE` inline. Being migrated to production incrementally — see the `spordo-architecture` skill for the target stack.
+
+## PRODUCTION LOCATION & ACCOUNTS — read this first
+
+- **This repo IS production.** `/Users/massimobianchi/Documents/Spordo.co` → GitHub `spordomedia-creator/Spordo.co` → Worker **`spordo-co`** on the **`spordomedia@gmail.com`** Cloudflare account → serves **spordo.org**. Edit `public/TrueSpordo.html` here.
+- **`/Users/massimobianchi/Documents/spordo` is a STALE SIDE COPY — never edit or deploy it.** It's a divergent 3.5MB build (base64-inlined images) with its own worker `spordo-api` on a *different* Cloudflare account (`mbianchi@gcschool.org`). That whole build/account is being **retired**. If a handoff doc or chat points you there, stop — it's the wrong target. (This mismatch caused a full session of wasted work.)
+- **Only `spordomedia@gmail.com` is used for Cloudflare.** Before `wrangler deploy`, confirm `npx wrangler whoami` shows `spordomedia@gmail.com` — logins have gotten swapped to the mbianchi account. If wrong: `npx wrangler logout && npx wrangler login` (sign out of Cloudflare in the browser first so it doesn't re-authorize mbianchi).
+- **Auth is Supabase** (project `spordo` / `avwvtjsabmhqqeosqubw`), NOT the `spordo-api` custom-auth backend. Live features: signup, signin, forgot-password, reset, account panel, resend-verification, sign-out-all (all in `public/TrueSpordo.html`, built on `_sb = supabase.createClient(...)`). Auth emails go through **Resend** (custom SMTP set in Supabase → Authentication → Emails); Supabase **Site URL = https://spordo.org**.
 
 ## Commands
 
@@ -34,20 +41,21 @@ Local D1 (`wrangler dev`) and remote/production D1 are **separate stores that st
 - **Everything else** (Socrata sync, auth, the other 127 fields) → **Supabase**.
 - Same table names (`field_permit_cache`, `field_sync_meta`) in two different backends by design. A fix to one does not apply to the other.
 
-## HRPT scraper gotchas (hudsonriverpark.org)
+## HRPT sync — reads weekly schedule IMAGES with vision (not HTML tables)
 
-Full reasoning lives in the code comments (`src/hrpt/tableGrid.js`, `src/hrpt/fieldMap.js`) — don't duplicate it here, but know these exist before assuming a parsing failure means the page changed again:
+HRPT replaced its HTML permit tables with weekly JPG graphics, so the old HTML-table parser was deleted (PR #18). Current pipeline (`src/hrpt/`):
 
-- Each table's `<thead>` has a full-width banner `<tr>` (a heading image) *before* the real header row — don't assume row 0 is the header.
-- Live-page table captions always end in `" Schedule"`; field-name matching strips it. Two fields (Pier 40 Courtyard East/West) also drop the word "Field" — handled via explicit aliases.
-- A benign, unfixed "block 0, found 10 tables" anomaly logs every run (likely a duplicate responsive-layout view) — doesn't lose data, not worth guess-fixing without more evidence.
-- If HRPT sync writes 0 rows: check a local `--test-scheduled` run before suspecting infra. Both real incidents so far were parsing/mapping bugs, not Cloudflare/D1 problems.
+- `imageSource.js` scrapes the permits page for the week's `Field_Schedules` JPG URLs (fallback: constructs them from the week's Sunday) and fetches bytes + a sha-256 per image.
+- `visionParser.js` reads each image with the Anthropic vision API (`claude-haiku-4-5`) → `{field, days:{sunday..saturday:[ranges]}}`. **Requires the `ANTHROPIC_API_KEY` worker secret.**
+- `sync.js` maps field names (`fieldMap.js`), writes booked blocks to D1, and stores an image-set hash so it only calls (paid) vision when an image actually changed. A failed/empty read never overwrites the cache.
+- Runs on cron **`0 */3 * * *` (HRPT)**; Socrata runs on **`15 */3 * * *`** — separate ticks so each gets its own Cloudflare subrequest budget (bundling them overflowed the 50/invocation cap). Dispatch is by `event.cron` in `src/index.js`.
+- To test a run: `npx wrangler dev --remote --test-scheduled`, then `curl "http://localhost:PORT/__scheduled?cron=0%20*/3%20*%20*%20*"`.
 
-## HRPT data is now displayed, not just collected
+## HRPT data is displayed via the same grid as everything else
 
-- `GET /api/permits/:fieldId` (`src/permitsApi.js`) reads D1 server-side and returns `{meta, permits}` — the browser can't reach D1 directly (unlike Supabase's public REST API), so this route exists specifically for that.
-- HRPT fields render through the **same** `renderSchdWeek`/`renderSchdMonth` grid every other field uses (`public/TrueSpordo.html`), not a separate component — `_hrptRowToPermit()` adapts a D1 row into the same shape a Socrata permit object already has (`start_date_time`/`end_date_time`/`event_name`) so the existing badge/label helpers work unmodified. Data is fetched once per field and cached on the field object (`f._permitsLoaded`).
-- `isBareTimeFragment()` (`src/hrpt/dateTime.js`) suppresses a booked cell's raw text (e.g. `"9:00 AM–"`) from becoming a fake `event_name` when it's just the block's own start time echoed back with no real label — parser-only fix, so already-cached bad rows clear on the next sync (~3h), not instantly.
+- `GET /api/permits/:fieldId` (`src/permitsApi.js`) reads D1 server-side and returns `{meta, permits}` — the browser can't reach D1 directly, so this route exists for that. The read floors on today's date + a horizon so stale past rows don't bury current data.
+- HRPT fields render through the **same** `renderSchdWeek`/`renderSchdMonth` grid every other field uses (`public/TrueSpordo.html`), adapting D1 rows into the Socrata permit shape (`start_date_time`/`end_date_time`/`event_name`). Cached per field via `f._permitsLoaded`.
+- External non-NYC-Parks fields with a published seasonal schedule (e.g. Brooklyn Bridge Park's Pier 5, in `EXTERNAL_ORGS` + `BBP_PIER5_SCHEDULES`) are transcribed by hand and rendered as booked blocks with a season banner + disclaimer. A source-stale notice covers HRPT weeks HRPT hasn't posted yet.
 
 ## CI (`.github/workflows/deploy.yml`)
 
