@@ -3617,6 +3617,15 @@ const SUPABASE_URL  = 'https://avwvtjsabmhqqeosqubw.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF2d3Z0anNhYm1ocXFlb3NxdWJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyODU5MDMsImV4cCI6MjA5NDg2MTkwM30.XJJ4mM5v4VNaELlMpXN7-VyripI35GNDhg8p3QSZwC8';
 const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
+// Capture a password-reset link the moment the page loads. supabase-js parses
+// and STRIPS the recovery token from the URL during its async init, and the
+// PASSWORD_RECOVERY event can fire before our onAuthStateChange listener is
+// attached — so reading it synchronously here is the reliable signal. The
+// recovery link returns as e.g. "…/#access_token=…&type=recovery".
+const _spordoRecoveryLink =
+  (window.location.hash || '').includes('type=recovery') ||
+  (window.location.search || '').includes('type=recovery');
+
 /* ── AUTH MODAL CONTROL ──────────────────────── */
 function authModal(open, tab = 'signin') {
   const el = document.getElementById('auth-modal');
@@ -3803,8 +3812,7 @@ function _updateNavAccount(user) {
 /* ── SUPABASE INIT ───────────────────────────── */
 async function initSupabase() {
   if (SUPABASE_URL.startsWith('REPLACE')) return; // not configured yet
-  const { data: { session } } = await _sb.auth.getSession();
-  if (session?.user) _updateNavAccount(session.user);
+  // Register the listener BEFORE any await so we don't miss PASSWORD_RECOVERY.
   _sb.auth.onAuthStateChange((event, session) => {
     _updateNavAccount(session?.user ?? null);
     // Arriving via a password-reset email: supabase-js parses the recovery
@@ -3816,6 +3824,14 @@ async function initSupabase() {
       _renderAccount(session.user);
     }
   });
+  const { data: { session } } = await _sb.auth.getSession();
+  if (session?.user) _updateNavAccount(session.user);
+  // Fallback: the PASSWORD_RECOVERY event may have fired before the listener
+  // above was attached (supabase-js processes the URL during construction), so
+  // open the reset form from the flag we captured synchronously at load. By
+  // now getSession() has resolved the recovery session, so authReset()'s
+  // updateUser() will apply the new password to the right account.
+  if (_spordoRecoveryLink) authModal(true, 'reset');
 }
 
 /* ── PERMIT INFO ─────────────────────────────────── */
