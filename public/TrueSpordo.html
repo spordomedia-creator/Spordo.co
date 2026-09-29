@@ -62,7 +62,6 @@
   </div>
   <div class="nav-links">
     <div class="nav-link active" data-view="home"    onclick="go('home')"    onkeydown="if(event.key==='Enter')go('home')"    role="link" tabindex="0">Fields</div>
-    <div class="nav-link"        data-view="mission" onclick="go('mission')" onkeydown="if(event.key==='Enter')go('mission')" role="link" tabindex="0">Mission</div>
     <div class="nav-link"        data-view="saved"   onclick="go('saved')"   onkeydown="if(event.key==='Enter')go('saved')"   role="link" tabindex="0">Saved</div>
     <div class="nav-account-btn" id="nav-account-btn" onclick="authModal(true)" onkeydown="if(event.key==='Enter')authModal(true)" role="button" tabindex="0" aria-label="Sign in or manage account">Sign In</div>
     <div class="nav-live" aria-live="polite">
@@ -76,9 +75,6 @@
 <nav class="mobile-tabbar" aria-label="Primary">
   <a class="mtab active" data-view="home" onclick="go('home')" onkeydown="if(event.key==='Enter')go('home')" role="link" tabindex="0" aria-label="Fields">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s7-6.3 7-11a7 7 0 1 0-14 0c0 4.7 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
-  </a>
-  <a class="mtab" data-view="mission" onclick="go('mission')" onkeydown="if(event.key==='Enter')go('mission')" role="link" tabindex="0" aria-label="Mission">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/></svg>
   </a>
   <a class="mtab" data-view="saved" onclick="go('saved')" onkeydown="if(event.key==='Enter')go('saved')" role="link" tabindex="0" aria-label="Saved">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>
@@ -178,10 +174,6 @@
         <button class="btn-primary hero-fade-seq" onclick="pickSport('soccer')">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style="margin-right:6px;vertical-align:-2px"><circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" stroke-width="1.5"/><path d="M10 10l3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           SEE ALL FIELDS
-        </button>
-        <button class="btn-ghost hero-fade-seq" onclick="go('mission')">
-          Our Story
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2.5 7h9M8.5 4l3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
       </div>
     </div>
@@ -298,136 +290,6 @@
 </section>
 
 
-
-<!-- ══════════════════════════════════════════
-     MISSION VIEW
-══════════════════════════════════════════ -->
-<section class="view" id="view-mission" aria-label="Our mission">
-
-  <!-- ── HERO ── -->
-  <div class="mv-hero">
-    <!-- PHOTO PLACEHOLDER: Candid wide shot — players arriving at a NYC park field at golden hour, documentary style, slightly underexposed. Replace .mv-hero-img background-image with real photo. -->
-    <div class="mv-hero-img" aria-hidden="true"></div>
-    <div class="mv-hero-content">
-      <div class="mv-eyebrow">About Spordo</div>
-      <h1 class="mv-hero-h1">
-        <span class="outline">THE</span>
-        <span class="accent">FIELD</span>
-        <span class="solid">IS OURS</span>
-      </h1>
-      <p class="mv-pull-quote">"We didn't build this for investors. We built it because we kept showing up and finding locked gates."</p>
-    </div>
-  </div>
-
-  <!-- ── STORY BLOCK 1 ── -->
-  <div class="mv-story">
-    <div class="mv-story-img" aria-hidden="true">
-      <!-- PHOTO PLACEHOLDER: Chain-link fence with permit notice taped to it, blurred field in background — close, honest, unglamorous -->
-      <div class="mv-story-img-caption">Pier 40 — Hudson River Park, West Village</div>
-    </div>
-    <div class="mv-story-text">
-      <div class="mv-story-kicker">The origin</div>
-      <h2 class="mv-story-h2">WHERE THIS<br><em>STARTED</em></h2>
-      <div class="mv-story-body">
-        <p>It started with a locked gate at Pier 40 on a Saturday morning. We'd organized a crew — three trains across two boroughs — and found a permit notice taped to the fence. No warning. No digital update. Just a paper sign and an afternoon gone.</p>
-        <p>That same week, four different groups said the same thing happened to them. At Astoria Park. In Fort Greene. At the fields behind Flushing Meadows.</p>
-        <p><strong>New York City has one of the most contested collections of public athletic space on earth.</strong> Five boroughs, eight million people, and a permit system that was built for the administrator — not the athlete.</p>
-        <p>Spordo was built to close that gap. Real-time permit data, surfaced for the person with a ball in their hand.</p>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── STORY BLOCK 2 — reversed layout ── -->
-  <div class="mv-story" style="direction:rtl">
-    <div class="mv-story-img" aria-hidden="true" style="direction:ltr">
-      <!-- PHOTO PLACEHOLDER: Overhead or wide shot of an outdoor pickup basketball game — Rucker Park or similar. Urban, authentic, alive. -->
-      <div class="mv-story-img-caption">Rucker Park — Harlem</div>
-    </div>
-    <div class="mv-story-text" style="direction:ltr">
-      <div class="mv-story-kicker">No gatekeepers</div>
-      <h2 class="mv-story-h2">WHO WE<br><em>BUILT THIS FOR</em></h2>
-      <div class="mv-story-body">
-        <p>The soccer player in Hunts Point who scouts fields on Sunday morning. The cricket team in Richmond Hill navigating NYRPA permits without any tools. The youth basketball league in Flatbush organizing six courts and three divisions by text message.</p>
-        <p>This isn't a startup. No venture capital. No growth hacking. <strong>Spordo is a free public tool built by people who play in these parks.</strong></p>
-        <p>We surface NYC Parks permit data so any player, any coach, any kid with a ball can know before they go. No paywall. No login. No nonsense.</p>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── WHY IT MATTERS ── -->
-  <div class="mv-why">
-    <div class="mv-why-kicker">Why we built this</div>
-    <h2 class="mv-why-h2">THE CASE FOR<br><em>TRANSPARENCY</em></h2>
-    <div class="mv-pillars">
-      <div class="mv-pillar">
-        <div class="mv-pillar-num">01</div>
-        <div class="mv-pillar-title">THE WASTED TRIP</div>
-        <div class="mv-pillar-text">Three trains, two buses, one locked gate. Every athlete in NYC has that story. We built Spordo so the next kid doesn't have to live it.</div>
-      </div>
-      <div class="mv-pillar">
-        <div class="mv-pillar-num">02</div>
-        <div class="mv-pillar-title">PUBLIC DATA IS PUBLIC</div>
-        <div class="mv-pillar-text">The permit data already exists. It's public record. Spordo just makes it readable — on your phone, before you leave the house.</div>
-      </div>
-      <div class="mv-pillar">
-        <div class="mv-pillar-num">03</div>
-        <div class="mv-pillar-title">BUILT FOR EVERY BOROUGH</div>
-        <div class="mv-pillar-text">Not Silicon Valley. This tool was built for the soccer player in Hunts Point, the basketball crew in Flatbush, the cricket team in Richmond Hill.</div>
-      </div>
-      <div class="mv-pillar">
-        <div class="mv-pillar-num">04</div>
-        <div class="mv-pillar-title">NO GATEKEEPERS</div>
-        <div class="mv-pillar-text">Anyone who's organized a pickup game knows the permit system is confusing. We're not changing it — we're making it transparent.</div>
-      </div>
-      <div class="mv-pillar">
-        <div class="mv-pillar-num">05</div>
-        <div class="mv-pillar-title">COMMUNITY FIRST</div>
-        <div class="mv-pillar-text">Every feature was built from actual athlete feedback. If it doesn't solve a real problem, we don't ship it.</div>
-      </div>
-      <div class="mv-pillar">
-        <div class="mv-pillar-num">06</div>
-        <div class="mv-pillar-title">FREE. PERIOD.</div>
-        <div class="mv-pillar-text">No paywall. No login. No VC funding. Just civic data, made human. We'll keep building until every athlete in NYC can know what they'll find.</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── PROOF STRIP ── -->
-  <div class="mv-proof" role="list" aria-label="Spordo by the numbers">
-    <div class="mv-proof-stat" role="listitem">
-      <div class="mv-proof-num">137</div>
-      <div class="mv-proof-label">Fields Tracked</div>
-    </div>
-    <div class="mv-proof-stat" role="listitem">
-      <div class="mv-proof-num">5</div>
-      <div class="mv-proof-label">Boroughs Covered</div>
-    </div>
-    <div class="mv-proof-stat" role="listitem">
-      <div class="mv-proof-num">$0</div>
-      <div class="mv-proof-label">Cost to Use</div>
-    </div>
-    <div class="mv-proof-stat" role="listitem">
-      <div class="mv-proof-num">∞</div>
-      <div class="mv-proof-label">Wasted Trips Prevented</div>
-    </div>
-  </div>
-
-  <footer class="footer">
-    <div class="footer-left">
-      <div class="footer-logo">SPOR<span class="em">DO</span></div>
-      <div class="footer-social" aria-label="Follow Spordo">
-        <a href="https://www.instagram.com/spordomedia/" target="_blank" rel="noopener" class="footer-social-link" aria-label="Instagram" title="Instagram">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
-        </a>
-<a href="https://www.tiktok.com/@spordo" target="_blank" rel="noopener" class="footer-social-link" aria-label="TikTok" title="TikTok">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1V9.01a6.33 6.33 0 0 0-.79-.05 6.34 6.34 0 0 0-6.34 6.34 6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.33-6.34V8.75a8.26 8.26 0 0 0 4.83 1.55V6.86a4.85 4.85 0 0 1-1.06-.17z"/></svg>
-        </a>
-        <a href="mailto:Spordomedia@gmail.com" class="footer-contact">Contact: Spordomedia@gmail.com</a>
-      </div>
-    </div>
-    <div class="footer-meta">Built for the community. Free forever.<br><a onclick="go('legal')" href="javascript:void(0)">Terms</a> · <a onclick="go('legal'); switchLegalView('pp')" href="javascript:void(0)">Privacy Policy</a></div>
-  </footer>
-</section>
 
 <!-- ══════════════════════════════════════════
      DONATE VIEW
@@ -1706,8 +1568,8 @@ async function _restoreFromUrlInner() {
   if (!parts.length) { go('home'); return; }
   const sport = SPORTS.find(s => s.id === parts[0]);
   if (!sport) {
-    // Non-sport top-level views (waitlist, saved, mission, legal) or an unknown path.
-    if (['saved', 'mission', 'legal'].includes(parts[0])) go(parts[0]);
+    // Non-sport top-level views (saved, legal) or an unknown path.
+    if (['saved', 'legal'].includes(parts[0])) go(parts[0]);
     else go('home');
     return;
   }
