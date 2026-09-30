@@ -1915,6 +1915,7 @@ function permitDisplayName(p) {
 }
 
 function permitTypeBadge(p) {
+  if (p._open) return '<span class="permit-type-badge public">PUBLIC</span>';
   const t = (p.event_type || '').toLowerCase();
   if (t.includes('youth'))   return '<span class="permit-type-badge youth">YOUTH</span>';
   if (t.includes('adult'))   return '<span class="permit-type-badge adult">ADULT</span>';
@@ -2642,7 +2643,9 @@ function fieldStatus(permits) {
   const now    = new Date();
   const todStr = now.toISOString().split('T')[0];
   const hr     = now.getHours();
-  const todPms = permits.filter(p => permitDate(p) === todStr);
+  // Public-hours windows (Asphalt Green) mark when a field is OPEN, not
+  // booked — never let them read as "In Use".
+  const todPms = permits.filter(p => !p._open && permitDate(p) === todStr);
   if (!todPms.length) return { cls:'open', label:'Open Today' };
   const active = todPms.find(p => hr >= permitStartHour(p) && hr < permitEndHour(p));
   return active ? { cls:'taken', label:'In Use' } : { cls:'open', label:'Open Now' };
@@ -2862,10 +2865,26 @@ function renderSchdBody() {
       return;
     }
 
+    // Public-hours source (Asphalt Green): the green blocks are the ONLY
+    // times the field is open to the public, so say so up front — an empty
+    // day here means "not public", not "free".
+    const banner = f._publicHours
+      ? `<div class="schd-stale-notice schd-info-notice">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M10 9v4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <circle cx="10" cy="6.25" r="0.9" fill="currentColor"/>
+          </svg>
+          <div>
+            <div class="schd-stale-title">Public hours only</div>
+            <div class="schd-stale-detail"><strong>Green blocks</strong> are when ${esc(f.operator)} opens the field to the public. The rest of the day it's used for ${esc(f.orgShort)} programs and rentals, which aren't published. Hours can change — check ${esc(f.orgShort)} before you go. <a href="https://account.asphaltgreen.org/s/public-hours" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">${esc(f.orgShort)} public hours →</a></div>
+          </div>
+        </div>`
+      : '';
     if (S.panelView === 'month') {
-      renderSchdMonth(f, '', footer);
+      renderSchdMonth(f, banner, footer);
     } else {
-      renderSchdWeek(f, '', footer);
+      renderSchdWeek(f, banner, footer);
     }
     return;
   }
@@ -2901,7 +2920,7 @@ function renderSchdDay(f) {
     const holder = permitDisplayName(p);
     const badge  = permitTypeBadge(p);
     const fmt = h => h < 12 ? `${h}am` : h === 12 ? '12pm' : `${h-12}pm`;
-    return `<div class="schd-permit-block" style="top:${top}px;height:${height}px">
+    return `<div class="schd-permit-block${p._open ? ' is-open' : ''}" style="top:${top}px;height:${height}px">
       <div class="permit-org-row">${badge}<div class="schd-permit-name">${esc(holder)}</div></div>
       <div class="schd-permit-time">${fmt(sh)} – ${fmt(eh)}</div>
     </div>`;
@@ -2943,12 +2962,12 @@ function renderSchdWeek(f, prefixHtml = '', suffixHtml = '') {
       const sh = permitStartHour(p), eh = permitEndHour(p);
       const holder = permitDisplayName(p);
       const badge  = permitTypeBadge(p);
-      return `<div class="schd-week-permit">
+      return `<div class="schd-week-permit${p._open ? ' is-open' : ''}">
         ${badge}
         <div class="schd-week-permit-time">${sh >= 99 ? '—' : `${fmt(sh)}–${fmt(eh)}`}</div>
         <div class="schd-week-permit-name">${esc(holder)}</div>
       </div>`;
-    }).join('') || `<div class="schd-week-none">Free</div>`;
+    }).join('') || `<div class="schd-week-none">${f._publicHours ? 'No public hours' : 'Free'}</div>`;
 
     return `<div class="schd-week-col${isToday?' is-today':''}">
       <div class="schd-week-day-label">${DAY_NAMES[d.getDay()]}${isToday?' ·':''}</div>
@@ -2990,8 +3009,9 @@ function renderSchdMonth(f, prefixHtml = '', suffixHtml = '') {
       const sh = permitStartHour(p);
       return `<div class="schd-month-permit-count">${fmt(sh)} ${esc(permitDisplayName(p)).slice(0,12)}</div>`;
     }).join('');
-    cells += `<div class="schd-month-day${isToday?' today':''}${count?' has-permits':''}"
-        onclick="schdMonthPickDay('${ds}')" title="${count} permit${count!==1?'s':''}">
+    const unit = f._publicHours ? 'public window' : 'permit';
+    cells += `<div class="schd-month-day${isToday?' today':''}${count?(f._publicHours?' has-open':' has-permits'):''}"
+        onclick="schdMonthPickDay('${ds}')" title="${count} ${unit}${count!==1?'s':''}">
       <div class="schd-month-day-num">${dayNum}</div>
       <div class="schd-month-pip">${Array.from({length:Math.min(count,5)},()=>`<div class="schd-month-pip-dot"></div>`).join('')}</div>
       ${miniLabels}
@@ -3730,7 +3750,12 @@ function _hrptRowToPermit(r) {
 // this field later doesn't re-fetch.
 async function loadExternalPermits(f) {
   const { meta, permits } = await fetchPermitsPayload(f.id);
-  f.permits = (permits || []).map(_hrptRowToPermit);
+  // "public_hours" = the source publishes when the field is OPEN to the
+  // public (Asphalt Green's Litwin Field, src/asphaltGreen/sync.js), the
+  // inverse of every other source. Flag each row so the grid draws it as a
+  // green open block instead of a booking.
+  f._publicHours = meta?.live_availability_status === 'public_hours';
+  f.permits = (permits || []).map(r => ({ ..._hrptRowToPermit(r), _open: f._publicHours }));
   // "no_permit_schedule" = confirmed (not guessed) via source research that
   // this field has no bookable schedule at all — e.g. Chelsea Waterside
   // Basketball Court is drop-in/first-come-first-served, so HRPT publishes
