@@ -9,6 +9,7 @@
 import { runHrptSync } from "./hrpt/sync.js";
 import { handlePermitsRequest } from "./permitsApi.js";
 import { runSocrataSync } from "./socrata/sync.js";
+import { runAsphaltGreenSync } from "./asphaltGreen/sync.js";
 import { handleSocrataPermitsRequest } from "./socrataPermitsApi.js";
 import { getFieldCoverage } from "./hrpt/d1Client.js";
 import { EXACT_NAME_TO_FIELD_ID } from "./hrpt/fieldMap.js";
@@ -77,14 +78,19 @@ export default {
   // sendSlackAlert no-ops instead of throwing, so a missing webhook never
   // breaks the sync run it would have reported on.
   async scheduled(event, env, ctx) {
-    // HRPT (:00) and Socrata (:15) run on separate cron ticks so each gets
-    // its own Cloudflare per-invocation subrequest budget (see the triggers
-    // note in wrangler.jsonc). A tick whose cron matches neither — e.g. a
-    // manual `--test-scheduled` hit with no ?cron= — runs both, which is
-    // fine for local testing.
+    // HRPT (:00), Socrata (:15) and Asphalt Green (:30) run on separate
+    // cron ticks so each gets its own Cloudflare per-invocation subrequest
+    // budget (see the triggers note in wrangler.jsonc). A tick whose cron
+    // matches none of them — e.g. a manual `--test-scheduled` hit with no
+    // ?cron= — runs all three, which is fine for local testing.
     const cron = event && event.cron;
-    const runHrpt = cron !== "15 */3 * * *";
-    const runSocrata = cron !== "0 */3 * * *";
+    const CRON_HRPT = "0 */3 * * *";
+    const CRON_SOCRATA = "15 */3 * * *";
+    const CRON_AG = "30 */3 * * *";
+    const runAll = ![CRON_HRPT, CRON_SOCRATA, CRON_AG].includes(cron);
+    const runHrpt = runAll || cron === CRON_HRPT;
+    const runSocrata = runAll || cron === CRON_SOCRATA;
+    const runAg = runAll || cron === CRON_AG;
 
     if (runHrpt) ctx.waitUntil(
       runHrptSync(env).then(async (summary) => {
@@ -120,6 +126,21 @@ export default {
         }
 
         const failureMsg = buildSyncFailureAlert("Socrata", summary);
+        if (failureMsg) await sendSlackAlert(env.SLACK_ALERT_WEBHOOK_URL, failureMsg);
+      })
+    );
+    // No separate staleness check needed: a run that gets no windows back
+    // reports ok:false itself (see runAsphaltGreenSync), and permitsApi.js
+    // flags source_data_stale per field if cached rows stop reaching today.
+    if (runAg) ctx.waitUntil(
+      runAsphaltGreenSync(env).then(async (summary) => {
+        if (!summary.ok) {
+          console.error("[scheduled] Asphalt Green sync did not complete successfully:", summary.reason, summary);
+        } else {
+          console.log("[scheduled] Asphalt Green sync complete:", summary);
+        }
+
+        const failureMsg = buildSyncFailureAlert("Asphalt Green", summary);
         if (failureMsg) await sendSlackAlert(env.SLACK_ALERT_WEBHOOK_URL, failureMsg);
       })
     );
