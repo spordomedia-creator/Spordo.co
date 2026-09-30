@@ -186,6 +186,13 @@
     </div>
   </div>
 
+  <!-- Hot fields: curated shortcuts straight to a field's schedule (see HOT_FIELDS / renderHotFields) -->
+  <div class="hot-fields" role="region" aria-labelledby="hot-fields-title">
+    <div class="hot-kicker">Most checked</div>
+    <h2 class="hot-title" id="hot-fields-title">HOT <em>FIELDS</em></h2>
+    <div class="hot-grid" id="hot-grid"></div>
+  </div>
+
   <footer class="footer">
     <div class="footer-left">
     <div class="footer-logo">SPOR<span class="em">DO</span></div>
@@ -1220,6 +1227,51 @@ const FIELD_COORDS = {
   'Williamsbridge Oval':               [40.87763, -73.87738],
 };
 
+
+/* ── HOT FIELDS (home page shortcuts) ─────── */
+// Names must match FIELD_DATABASE (HRPT fields) or EXTERNAL_ORGS (Pier 5)
+// exactly — ids are resolved from those at render time, never hand-typed,
+// so a card can't silently point at a field that doesn't exist.
+const HOT_FIELDS = [
+  { name:'Pier 40 Courtyard East Field',       borough:'MANHATTAN', sport:'soccer', note:'Hudson River Park · West Village' },
+  { name:'Pier 40 Courtyard West Field',       borough:'MANHATTAN', sport:'soccer', note:'Hudson River Park · West Village' },
+  { name:'Pier 40 Indoor Field',               borough:'MANHATTAN', sport:'soccer', note:'Hudson River Park · West Village' },
+  { name:'Pier 40 Rooftop Field #1',           borough:'MANHATTAN', sport:'soccer', note:'Hudson River Park · West Village' },
+  { name:'Pier 40 Rooftop Field #2',           borough:'MANHATTAN', sport:'soccer', note:'Hudson River Park · West Village' },
+  { name:'Pier 5 Soccer Field',                borough:'BROOKLYN',  sport:'soccer', note:'Brooklyn Bridge Park · Brooklyn Heights' },
+  { name:'Gansevoort Peninsula Playing Field', borough:'MANHATTAN', sport:'soccer', note:'Hudson River Park · Meatpacking District' },
+];
+
+function renderHotFields() {
+  const grid = document.getElementById('hot-grid');
+  if (!grid) return;
+  grid.innerHTML = HOT_FIELDS.map(h => {
+    const db  = FIELD_DATABASE.find(f => f.name === h.name && f.borough === h.borough);
+    const ext = EXTERNAL_ORGS.find(e => e.name === h.name && e.borough === h.borough);
+    if (!db && !ext) return '';
+    const id  = db ? db.id : encodeId(h.name + '|' + h.borough);
+    const org = (db && db.orgShort) || (ext && ext.orgShort) || '';
+    return `<button type="button" class="hot-card" onclick="openHotField('${esc(h.sport)}','${esc(id)}')" aria-label="${esc(h.name)} — view schedule">
+      <div class="hot-card-top">
+        ${org ? `<span class="fa-org-tag">${esc(org)}</span>` : ''}
+        <span class="hot-card-sport">${esc(h.sport)}</span>
+      </div>
+      <div class="hot-card-name">${esc(h.name)}</div>
+      <div class="hot-card-note">${esc(h.note)}</div>
+      <div class="hot-card-cta">View schedule
+        <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2.5 7h9M8.5 4l3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+    </button>`;
+  }).join('');
+}
+
+// Goes through the same deep-link path as a shared /<sport>/field/<id> URL
+// (restoreFromUrl -> pickSport -> openSchedulePage), so the field loads with
+// its sport's full field list behind it and Back returns to the home page.
+function openHotField(sport, id) {
+  history.pushState({}, '', `/${sport}/field/${encodeURIComponent(id)}`);
+  restoreFromUrl();
+}
 
 /* ── FIELD DIRECTORY (curated + featured) ─── */
 const FIELD_DIRECTORY = [
@@ -3454,6 +3506,7 @@ function runIntroAnimation(isGated) {
 /* ── Hero h1 IntersectionObserver disabled on first load (intro handles it) ── */
 document.addEventListener('DOMContentLoaded', () => {
   renderSportGrid();
+  renderHotFields();
   restoreFromUrl();
   runIntroAnimation(false);
   initSupabase();
