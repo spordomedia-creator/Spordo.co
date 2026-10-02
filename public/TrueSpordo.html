@@ -190,7 +190,23 @@
   <div class="hot-fields" role="region" aria-labelledby="hot-fields-title">
     <div class="hot-kicker">Most checked</div>
     <h2 class="hot-title" id="hot-fields-title">HOT <em>FIELDS</em></h2>
-    <div class="hot-grid" id="hot-grid"></div>
+    <!-- 3D cylinder carousel (vanilla port of 21st.dev's 3d-carousel): drag/swipe to spin, tap a card to expand -->
+    <div class="hot-stage" id="hot-stage" tabindex="0" role="group" aria-roledescription="carousel"
+         aria-label="Hot fields. Use left and right arrow keys to rotate, Enter to open the front field.">
+      <div class="hot-cyl" id="hot-cyl"></div>
+    </div>
+    <div class="hot-controls">
+      <button type="button" class="hot-nav" onclick="hotCarouselStep(-1)" aria-label="Previous field">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M11.5 7h-9M5.5 4l-3 3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="hot-hint" id="hot-front-name" aria-live="polite"></div>
+      <button type="button" class="hot-nav" onclick="hotCarouselStep(1)" aria-label="Next field">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2.5 7h9M8.5 4l3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="hot-overlay" id="hot-overlay" hidden onclick="if(event.target===this)closeHotField()">
+    <div class="hot-overlay-card" id="hot-overlay-card" role="dialog" aria-modal="true" aria-labelledby="hot-overlay-name"></div>
   </div>
 
   <footer class="footer">
@@ -1228,41 +1244,216 @@ const FIELD_COORDS = {
 };
 
 
-/* ── HOT FIELDS (home page shortcuts) ─────── */
+/* ── HOT FIELDS (home page 3D carousel) ───── */
 // Names must match FIELD_DATABASE (HRPT fields) or EXTERNAL_ORGS (Pier 5)
 // exactly — ids are resolved from those at render time, never hand-typed,
 // so a card can't silently point at a field that doesn't exist.
+// `photo` = background-position into /images/og-image.jpg, which is a real
+// photo of Pier 40 — so only Pier 40 cards use it; the others get pitch art.
 const HOT_FIELDS = [
-  { name:'Pier 40 Courtyard East Field',       borough:'MANHATTAN', sport:'soccer', note:'Hudson River Park · West Village' },
-  { name:'Pier 40 Courtyard West Field',       borough:'MANHATTAN', sport:'soccer', note:'Hudson River Park · West Village' },
-  { name:'Pier 40 Indoor Field',               borough:'MANHATTAN', sport:'soccer', note:'Hudson River Park · West Village' },
-  { name:'Pier 40 Rooftop Field #1',           borough:'MANHATTAN', sport:'soccer', note:'Hudson River Park · West Village' },
-  { name:'Pier 40 Rooftop Field #2',           borough:'MANHATTAN', sport:'soccer', note:'Hudson River Park · West Village' },
-  { name:'Pier 5 Soccer Field',                borough:'BROOKLYN',  sport:'soccer', note:'Brooklyn Bridge Park · Brooklyn Heights' },
-  { name:'Gansevoort Peninsula Playing Field', borough:'MANHATTAN', sport:'soccer', note:'Hudson River Park · Meatpacking District' },
+  { name:'Pier 40 Courtyard East Field',       borough:'MANHATTAN', sport:'soccer', eyebrow:'Pier', big:'40', kind:'Courtyard · East', accent:'#62b4cf', photo:'78% 72%', note:'Hudson River Park · West Village' },
+  { name:'Pier 40 Courtyard West Field',       borough:'MANHATTAN', sport:'soccer', eyebrow:'Pier', big:'40', kind:'Courtyard · West', accent:'#4ade80', photo:'18% 72%', note:'Hudson River Park · West Village' },
+  { name:'Pier 40 Indoor Field',               borough:'MANHATTAN', sport:'soccer', eyebrow:'Pier', big:'40', kind:'Indoor',           accent:'#a78bfa', photo:'50% 62%', note:'Hudson River Park · West Village' },
+  { name:'Pier 40 Rooftop Field #1',           borough:'MANHATTAN', sport:'soccer', eyebrow:'Pier', big:'40', kind:'Rooftop · #1',     accent:'#fbbf24', photo:'30% 40%', note:'Hudson River Park · West Village' },
+  { name:'Pier 40 Rooftop Field #2',           borough:'MANHATTAN', sport:'soccer', eyebrow:'Pier', big:'40', kind:'Rooftop · #2',     accent:'#f97316', photo:'72% 40%', note:'Hudson River Park · West Village' },
+  { name:'Pier 5 Soccer Field',                borough:'BROOKLYN',  sport:'soccer', eyebrow:'Pier', big:'5',  kind:'Turf',             accent:'#3b82f6', photo:null,      note:'Brooklyn Bridge Park · Brooklyn Heights' },
+  { name:'Gansevoort Peninsula Playing Field', borough:'MANHATTAN', sport:'soccer', eyebrow:'Peninsula', big:'Gansevoort', kind:'Waterfront', accent:'#f472b6', photo:null, note:'Hudson River Park · Meatpacking District' },
 ];
 
+// Top-down pitch markings, drawn in the card's accent color.
+const HOT_PITCH_SVG = `<svg class="hot-pitch" viewBox="0 0 100 64" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+  <g fill="none" stroke="currentColor" stroke-width="0.8">
+    <rect x="4" y="4" width="92" height="56" rx="1"/><line x1="50" y1="4" x2="50" y2="60"/>
+    <circle cx="50" cy="32" r="9"/><rect x="4" y="18" width="14" height="28"/><rect x="82" y="18" width="14" height="28"/>
+    <rect x="4" y="25" width="5" height="14"/><rect x="91" y="25" width="5" height="14"/>
+  </g></svg>`;
+
+const HC = { items: [], rot: 0, step: 0, vel: 0, raf: 0, drag: null, opened: -1 };
+const _hcReduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function _hotCardInner(h, i) {
+  return `
+    <div class="hot-face-art${h.photo ? ' has-photo' : ''}"${h.photo ? ` style="background-position:${h.photo}"` : ''}>
+      ${HOT_PITCH_SVG}
+      <div class="hot-face-mark"><span class="hot-face-eyebrow">${esc(h.eyebrow)}</span><span class="hot-face-big${h.big.length > 3 ? ' is-long' : ''}">${esc(h.big)}</span></div>
+    </div>
+    <div class="hot-face-body">
+      <div class="hot-face-top">
+        ${h.org ? `<span class="fa-org-tag">${esc(h.org)}</span>` : ''}
+        <span class="hot-face-kind">${esc(h.kind)}</span>
+      </div>
+      <div class="hot-face-name"${i === 'overlay' ? ' id="hot-overlay-name"' : ''}>${esc(h.name)}</div>
+      <div class="hot-face-note">${esc(h.note)}</div>
+    </div>`;
+}
+
 function renderHotFields() {
-  const grid = document.getElementById('hot-grid');
-  if (!grid) return;
-  grid.innerHTML = HOT_FIELDS.map(h => {
+  const cyl = document.getElementById('hot-cyl');
+  if (!cyl) return;
+  HC.items = HOT_FIELDS.map(h => {
     const db  = FIELD_DATABASE.find(f => f.name === h.name && f.borough === h.borough);
     const ext = EXTERNAL_ORGS.find(e => e.name === h.name && e.borough === h.borough);
-    if (!db && !ext) return '';
-    const id  = db ? db.id : encodeId(h.name + '|' + h.borough);
-    const org = (db && db.orgShort) || (ext && ext.orgShort) || '';
-    return `<button type="button" class="hot-card" onclick="openHotField('${esc(h.sport)}','${esc(id)}')" aria-label="${esc(h.name)} — view schedule">
-      <div class="hot-card-top">
-        ${org ? `<span class="fa-org-tag">${esc(org)}</span>` : ''}
-        <span class="hot-card-sport">${esc(h.sport)}</span>
-      </div>
-      <div class="hot-card-name">${esc(h.name)}</div>
-      <div class="hot-card-note">${esc(h.note)}</div>
-      <div class="hot-card-cta">View schedule
-        <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2.5 7h9M8.5 4l3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </div>
-    </button>`;
-  }).join('');
+    if (!db && !ext) return null;
+    return { ...h, id: db ? db.id : encodeId(h.name + '|' + h.borough), org: (db && db.orgShort) || (ext && ext.orgShort) || '' };
+  }).filter(Boolean);
+  HC.step = 360 / HC.items.length;
+  cyl.innerHTML = HC.items.map((h, i) =>
+    `<div class="hot-face" data-i="${i}" style="--hf-accent:${h.accent}"><div class="hot-face-card">${_hotCardInner(h, i)}</div></div>`
+  ).join('');
+  layoutHotCarousel();
+  if (!HC.bound) { _bindHotCarousel(); HC.bound = true; }
+}
+
+// Cylinder geometry, same as the React original: faces share the
+// circumference, radius = circumference / 2π. Narrower cylinder on phones.
+function layoutHotCarousel() {
+  const cyl = document.getElementById('hot-cyl');
+  if (!cyl || !HC.items.length) return;
+  const circumference = window.matchMedia('(max-width: 640px)').matches ? 1300 : 1900;
+  const faceW = circumference / HC.items.length;
+  const radius = circumference / (2 * Math.PI);
+  cyl.style.width = circumference + 'px';
+  cyl.querySelectorAll('.hot-face').forEach((el, i) => {
+    el.style.width = faceW + 'px';
+    el.style.transform = `rotateY(${i * HC.step}deg) translateZ(${radius}px)`;
+  });
+  _applyHotRot();
+}
+
+function _hotFrontIndex() {
+  const n = HC.items.length;
+  return ((Math.round(-HC.rot / HC.step) % n) + n) % n;
+}
+
+function _applyHotRot() {
+  const cyl = document.getElementById('hot-cyl');
+  if (cyl) cyl.style.transform = `rotateY(${HC.rot}deg)`;
+  const front = _hotFrontIndex();
+  document.querySelectorAll('#hot-cyl .hot-face').forEach((el, i) => el.classList.toggle('is-front', i === front));
+  const label = document.getElementById('hot-front-name');
+  const name = HC.items[front] && HC.items[front].name;
+  if (label && name && label.textContent !== name) label.textContent = name;
+}
+
+// Ease rotation to `target` degrees (snap / arrow-step). Instant under reduced motion.
+function _animateHotTo(target) {
+  cancelAnimationFrame(HC.raf);
+  if (_hcReduced()) { HC.rot = target; _applyHotRot(); return; }
+  const from = HC.rot, dur = 520, t0 = performance.now();
+  const ease = t => 1 - Math.pow(1 - t, 4);
+  const tick = now => {
+    const t = Math.min(1, (now - t0) / dur);
+    HC.rot = from + (target - from) * ease(t);
+    _applyHotRot();
+    if (t < 1) HC.raf = requestAnimationFrame(tick);
+  };
+  HC.raf = requestAnimationFrame(tick);
+}
+
+function _snapHot() { _animateHotTo(Math.round(HC.rot / HC.step) * HC.step); }
+
+function hotCarouselStep(dir) {
+  // Rotating the cylinder negatively brings the NEXT face (higher index) to the front.
+  _animateHotTo(Math.round(HC.rot / HC.step) * HC.step - dir * HC.step);
+}
+
+// Momentum after a flick: decay velocity, then settle on the nearest face.
+function _coastHot() {
+  cancelAnimationFrame(HC.raf);
+  if (_hcReduced() || Math.abs(HC.vel) < 0.02) { _snapHot(); return; }
+  let last = performance.now();
+  const tick = now => {
+    const dt = Math.min(48, now - last); last = now;
+    HC.rot += HC.vel * dt;
+    HC.vel *= Math.pow(0.94, dt / 16);
+    _applyHotRot();
+    if (Math.abs(HC.vel) > 0.02) HC.raf = requestAnimationFrame(tick);
+    else _snapHot();
+  };
+  HC.raf = requestAnimationFrame(tick);
+}
+
+function _bindHotCarousel() {
+  const stage = document.getElementById('hot-stage');
+  const DEG_PER_PX = 0.22;
+  stage.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    cancelAnimationFrame(HC.raf);
+    HC.drag = { x0: e.clientX, x: e.clientX, t: performance.now(), moved: 0, id: e.pointerId, target: e.target };
+    HC.vel = 0;
+  });
+  stage.addEventListener('pointermove', e => {
+    const d = HC.drag;
+    if (!d || e.pointerId !== d.id) return;
+    const now = performance.now(), dx = e.clientX - d.x;
+    d.moved = Math.max(d.moved, Math.abs(e.clientX - d.x0));
+    if (d.moved > 6 && !d.captured) { stage.setPointerCapture(e.pointerId); d.captured = true; stage.classList.add('is-dragging'); }
+    HC.rot += dx * DEG_PER_PX;
+    HC.vel = (dx * DEG_PER_PX) / Math.max(1, now - d.t);
+    d.x = e.clientX; d.t = now;
+    _applyHotRot();
+  });
+  const end = e => {
+    const d = HC.drag;
+    if (!d || e.pointerId !== d.id) return;
+    HC.drag = null;
+    stage.classList.remove('is-dragging');
+    if (d.moved <= 6) {
+      // A tap, not a drag: open the tapped card (or the front one if the tap missed a card).
+      const face = d.target.closest && d.target.closest('.hot-face');
+      openHotFieldCard(face ? +face.dataset.i : _hotFrontIndex());
+      return;
+    }
+    if (performance.now() - d.t > 80) HC.vel = 0;   // held still before release: no flick
+    HC.vel = Math.max(-0.6, Math.min(0.6, HC.vel)); // cap flick speed (deg/ms) so one swipe moves a few cards, not whole turns
+    _coastHot();
+  };
+  stage.addEventListener('pointerup', end);
+  stage.addEventListener('pointercancel', end);
+  stage.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft')  { e.preventDefault(); hotCarouselStep(-1); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); hotCarouselStep(1); }
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openHotFieldCard(_hotFrontIndex()); }
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && HC.opened >= 0) closeHotField(); });
+  let rz; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(layoutHotCarousel, 120); });
+}
+
+// Expanded view of one card (the original's click-to-zoom overlay), with
+// the action the gallery is actually for: opening the field's schedule.
+function openHotFieldCard(i) {
+  const h = HC.items[i];
+  if (!h) return;
+  // Bring the tapped card to the front behind the overlay, like the original.
+  _animateHotTo(-i * HC.step + Math.round((HC.rot + i * HC.step) / 360) * 360);
+  HC.opened = i;
+  const ov = document.getElementById('hot-overlay');
+  // The home view is its own stacking context, so a fixed overlay inside it
+  // renders under the nav / mobile tab bar no matter its z-index — lift it
+  // to <body> once.
+  if (ov.parentElement !== document.body) document.body.appendChild(ov);
+  const card = document.getElementById('hot-overlay-card');
+  card.style.setProperty('--hf-accent', h.accent);
+  card.innerHTML = `
+    <button type="button" class="hot-overlay-close" onclick="closeHotField()" aria-label="Close">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </button>
+    ${_hotCardInner(h, 'overlay')}
+    <div class="hot-overlay-actions">
+      <button type="button" class="btn-primary hot-overlay-cta" onclick="closeHotField(true); openHotField('${esc(h.sport)}','${esc(h.id)}')">View schedule</button>
+    </div>`;
+  ov.hidden = false;
+  requestAnimationFrame(() => ov.classList.add('open'));
+  card.querySelector('.hot-overlay-cta').focus();
+}
+
+function closeHotField(skipFocus) {
+  const ov = document.getElementById('hot-overlay');
+  if (!ov || ov.hidden) return;
+  HC.opened = -1;
+  ov.classList.remove('open');
+  setTimeout(() => { ov.hidden = true; }, _hcReduced() ? 0 : 260);
+  if (!skipFocus) document.getElementById('hot-stage')?.focus({ preventScroll: true });
 }
 
 // Goes through the same deep-link path as a shared /<sport>/field/<id> URL
