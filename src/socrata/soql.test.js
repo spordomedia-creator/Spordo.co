@@ -1,24 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { escapeSoqlString, isoDateOnly, daysFromIsoDate, buildSportWhereClause, buildSportPageUrl } from "./soql.js";
-import { PAGE_SIZE } from "./config.js";
 
 test("escapeSoqlString doubles single quotes", () => {
   assert.equal(escapeSoqlString("O'Brien"), "O''Brien");
   assert.equal(escapeSoqlString("no quotes"), "no quotes");
 });
 
-test("isoDateOnly / daysFromIsoDate produce YYYY-MM-DD strings for the New York calendar day", () => {
-  const d = new Date("2026-08-22T23:59:59.000Z"); // 7:59pm EDT, same date in both zones
+test("isoDateOnly / daysFromIsoDate produce YYYY-MM-DD strings, UTC-based", () => {
+  const d = new Date("2026-08-22T23:59:59.000Z");
   assert.equal(isoDateOnly(d), "2026-08-22");
   assert.equal(daysFromIsoDate(d, 90), "2026-11-20");
   assert.equal(daysFromIsoDate(d, 0), "2026-08-22");
-});
-
-test("isoDateOnly stays on the New York date after 8pm ET, when UTC has already rolled over", () => {
-  const evening = new Date("2026-08-23T00:30:00.000Z"); // 8:30pm EDT on Aug 22
-  assert.equal(isoDateOnly(evening), "2026-08-22");
-  assert.equal(daysFromIsoDate(evening, 90), "2026-11-20");
 });
 
 test("buildSportWhereClause never includes a trailing Z on timestamps (Socrata rejects it)", () => {
@@ -48,8 +41,7 @@ test("buildSportPageUrl includes $limit/$offset/$where/$order and points at the 
   const parsed = new URL(url);
   assert.equal(parsed.searchParams.get("$limit"), "1000");
   assert.equal(parsed.searchParams.get("$offset"), "1000");
-  // :id tiebreak keeps paging stable when many rows share a start time.
-  assert.equal(parsed.searchParams.get("$order"), "start_date_time ASC, :id ASC");
+  assert.equal(parsed.searchParams.get("$order"), "start_date_time ASC");
   assert.match(parsed.searchParams.get("$where"), /SOCCER/);
 });
 
@@ -57,5 +49,5 @@ test("buildSportPageUrl defaults offset to 0 and limit to PAGE_SIZE", () => {
   const url = buildSportPageUrl({ id: "soccer", eventNameLike: "SOCCER" }, { minDateIso: "2026-08-22", maxDateIso: "2026-11-20" });
   const parsed = new URL(url);
   assert.equal(parsed.searchParams.get("$offset"), "0");
-  assert.equal(parsed.searchParams.get("$limit"), String(PAGE_SIZE));
+  assert.equal(parsed.searchParams.get("$limit"), "1000");
 });

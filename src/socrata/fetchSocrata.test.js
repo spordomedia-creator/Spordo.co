@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fetchSportWindow } from "./fetchSocrata.js";
-import { PAGE_SIZE, MAX_PAGES_PER_SPORT } from "./config.js";
 
 function silentLog() {
   return { info: () => {}, warn: () => {}, error: () => {} };
@@ -34,13 +33,13 @@ test("pages through offsets until a short page is returned", async () => {
     call += 1;
     const u = new URL(url);
     const offset = Number(u.searchParams.get("$offset"));
-    // Two full pages, then a short third page.
-    const size = offset < 2 * PAGE_SIZE ? PAGE_SIZE : 200;
+    // Two full pages (1000 each), then a short third page.
+    const size = offset < 2000 ? 1000 : 200;
     return { ok: true, status: 200, json: async () => makeRows(size, offset) };
   };
   const result = await fetchSportWindow(sport, { ...window, fetchImpl, appToken: "tok", log: silentLog(), sleepImpl: noopSleep });
   assert.equal(result.pages, 3);
-  assert.equal(result.rawRows.length, 2 * PAGE_SIZE + 200);
+  assert.equal(result.rawRows.length, 1000 + 1000 + 200);
   assert.equal(result.truncated, false);
 });
 
@@ -103,12 +102,12 @@ test("a thrown network error is retried the same as a retryable HTTP failure", a
 });
 
 test("hitting MAX_PAGES_PER_SPORT stops fetching and reports truncated:true rather than looping forever", async () => {
-  const fetchImpl = async () => ({ ok: true, status: 200, json: async () => makeRows(PAGE_SIZE) }); // always a full page
+  const fetchImpl = async () => ({ ok: true, status: 200, json: async () => makeRows(1000) }); // always a full page
   const errors = [];
   const log = { info: () => {}, warn: () => {}, error: (m) => errors.push(m) };
   const result = await fetchSportWindow(sport, { ...window, fetchImpl, appToken: "tok", log, sleepImpl: noopSleep });
   assert.equal(result.truncated, true);
-  assert.equal(result.pages, MAX_PAGES_PER_SPORT);
+  assert.equal(result.pages, 20); // MAX_PAGES_PER_SPORT
   assert.ok(errors.some((e) => e.includes("MAX_PAGES_PER_SPORT")));
 });
 

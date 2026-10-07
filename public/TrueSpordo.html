@@ -1633,14 +1633,16 @@ function resolveSeasonalSchedule(schedules, todayIso) {
 }
 
 // Generate booked-permit objects (grid shape: start_date_time/end_date_time/
-// event_name) from a seasonal pattern for `numDays` days starting `fromIso`.
-// Dates are New York calendar dates, the same ones the week/month grids
-// use, so permitDate() matches.
-function genSeasonalPermits(sched, fromIso, numDays) {
+// event_name) from a seasonal pattern for `numDays` days starting `fromDate`.
+// Date strings are built the same way the week/month grids compute theirs
+// (local midnight -> toISOString date) so permitDate() matches.
+function genSeasonalPermits(sched, fromDate, numDays) {
   const out = [];
+  const base = new Date(fromDate); base.setHours(0, 0, 0, 0);
   for (let i = 0; i < numDays; i++) {
-    const ds = addDaysIso(fromIso, i);
-    for (const b of (sched.pattern[isoWeekday(ds)] || [])) {
+    const d = new Date(base); d.setDate(base.getDate() + i);
+    const ds = d.toISOString().split('T')[0];
+    for (const b of (sched.pattern[d.getDay()] || [])) {
       out.push({
         start_date_time: `${ds}T${String(b.from).padStart(2, '0')}:00:00.000`,
         end_date_time:   `${ds}T${String(b.to).padStart(2, '0')}:00:00.000`,
@@ -1853,24 +1855,8 @@ function esc(s) {
 function jsStr(s) {
   return String(s == null ? '' : s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
 }
-// New York calendar dates. Permit times are NYC local, but toISOString() is
-// the UTC date: already tomorrow from 8pm ET (7pm in winter), which hid
-// tonight's bookings and checked "In Use" against tomorrow's schedule, and
-// the day before for anyone east of UTC. Mirrors src/nycTime.js; keep the
-// two in sync.
-function _nycParts(d) {
-  const fmt = _nycParts.fmt || (_nycParts.fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23',
-  }));
-  return Object.fromEntries(fmt.formatToParts(d).map(p => [p.type, p.value]));
-}
-function nycDate(d = new Date()) { const p = _nycParts(d); return `${p.year}-${p.month}-${p.day}`; }
-function nycHour(d = new Date()) { return Number(_nycParts(d).hour) % 24; }
-function addDaysIso(ds, n) { const [y, m, d] = ds.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().split('T')[0]; }
-function isoWeekday(ds) { const [y, m, d] = ds.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); }
-function nycMonthStart() { const [y, m] = nycDate().split('-').map(Number); return new Date(y, m - 1, 1); }
-function today() { return nycDate(); }
-function daysFrom(n) { return addDaysIso(nycDate(), n); }
+function today() { return new Date().toISOString().split('T')[0]; }
+function daysFrom(n) { const d = new Date(); d.setDate(d.getDate()+n); return d.toISOString().split('T')[0]; }
 function parseHour(t) { if (!t) return 99; const p = String(t).split(':'); return parseInt(p[0],10)||0; }
 function timeAgo(ts) {
   const s = Math.floor((Date.now()-ts)/1000);
@@ -1986,7 +1972,7 @@ async function loadCounts() {
       const url = `${PERMITS_API}?sport=${encodeURIComponent(sp.id)}`;
       const r = await fetch(url);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const permits = dedupePermits(await r.json());
+      const permits = await r.json();
       const n = permits.filter(p => permitDate(p) && permitDate(p) <= e).length;
       const el = document.getElementById(`smeta-${sp.id}`);
       if (el) el.textContent = n ? `${n} permit${n!==1?'s':''} this week` : 'View all fields →';
@@ -2133,7 +2119,7 @@ async function loadFields() {
     const url = `${PERMITS_API}?sport=${encodeURIComponent(S.sport.id)}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    S.rawPermits = dedupePermits(await res.json());
+    S.rawPermits = await res.json();
     const base = mergeExternalFields(groupByField(S.rawPermits, S.borough));
     const merged = mergeDatabaseFields(base);
     renderFields(merged);
@@ -2164,20 +2150,6 @@ function permitEndHour(p) {
   return parseHour(p.endtime);
 }
 function permitName(p) { return p.event_name || p.eventname || 'Permit'; }
-
-// The cache can hold the same permit more than once (two sync runs writing
-// the same window at the same time). Copies look identical on the grid, so
-// keep one of each.
-function dedupePermits(permits) {
-  const seen = new Set();
-  return permits.filter(p => {
-    const key = [p.event_location, p.event_borough, p.start_date_time, p.end_date_time,
-                 p.event_name, p.event_type, p.permit_holder_name, p.organization].join('\u0001');
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
 
 function permitDisplayName(p) {
   const raw = p.event_name || p.eventname || p.permit_holder_name || p.organization || 'Permitted';
@@ -2232,10 +2204,10 @@ function mergeExternalFields(parksFields) {
       // (fieldStatus reads .permits) and the schedule grid show real data
       // instead of a fake "open". No D1/Socrata fetch for these.
       const season = e.seasonalSchedules
-        ? resolveSeasonalSchedule(e.seasonalSchedules, today())
+        ? resolveSeasonalSchedule(e.seasonalSchedules, new Date().toISOString().split('T')[0])
         : null;
       const permits = season
-        ? genSeasonalPermits(season, addDaysIso(today(), -14), 90)
+        ? genSeasonalPermits(season, new Date(Date.now() - 14 * 86400000), 90)
         : [];
       return {
         id: encodeId(e.name + '|' + e.borough),
@@ -2455,7 +2427,7 @@ function mockFields(sport, borough) {
   const sid = sport?.id || 'soccer';
   const names  = fieldsets[sid]  || fieldsets.soccer;
   const boros  = boroughMap[sid] || boroughMap.soccer;
-  const base = today();
+  const today_d = new Date(); today_d.setHours(0,0,0,0);
 
   return names
     .map((name, i) => {
@@ -2464,8 +2436,10 @@ function mockFields(sport, borough) {
       const permits = [];
       const numP = Math.floor(Math.random()*6);
       for (let j=0; j<numP; j++) {
-        const dateStr = addDaysIso(base, Math.floor(Math.random()*14));
+        const d = new Date(today_d);
+        d.setDate(d.getDate() + Math.floor(Math.random()*14));
         const h = 8 + Math.floor(Math.random()*11);
+        const dateStr = d.toISOString().split('T')[0];
         permits.push({
           start_date_time: `${dateStr}T${String(h).padStart(2,'0')}:00:00.000`,
           end_date_time:   `${dateStr}T${String(h+2).padStart(2,'0')}:00:00.000`,
@@ -2910,8 +2884,8 @@ function make7Dots(permits) {
 
 function fieldStatus(permits) {
   const now    = new Date();
-  const todStr = nycDate(now);
-  const hr     = nycHour(now);
+  const todStr = now.toISOString().split('T')[0];
+  const hr     = now.getHours();
   // Public-hours windows (Asphalt Green) mark when a field is OPEN, not
   // booked — never let them read as "In Use".
   const todPms = permits.filter(p => !p._open && permitDate(p) === todStr);
@@ -2942,7 +2916,7 @@ function openSchedulePage(fieldId) {
   S.activeField = f;
   S.selDate = new Date();
   S.panelView = 'week';
-  S.monthViewDate = nycMonthStart();
+  S.monthViewDate = new Date();
 
   // Background image
   const bg = document.getElementById('schd-fv-bg');
@@ -3217,11 +3191,12 @@ function renderSchdDay(f) {
 
 function renderSchdWeek(f, prefixHtml = '', suffixHtml = '') {
   const el = document.getElementById('schd-body');
-  const base = today();
+  const base = new Date(); base.setHours(0,0,0,0);
   const DAY_NAMES = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
 
   const cols = Array.from({length: 7}, (_, i) => {
-    const ds = addDaysIso(base, i);
+    const d = new Date(base); d.setDate(base.getDate() + i);
+    const ds = d.toISOString().split('T')[0];
     const dayP = f.permits.filter(p => permitDate(p) === ds);
     const isToday = i === 0;
     const fmt = h => h < 12 ? `${h}am` : h === 12 ? '12pm' : h >= 24 ? '12am' : `${h-12}pm`;
@@ -3238,7 +3213,7 @@ function renderSchdWeek(f, prefixHtml = '', suffixHtml = '') {
     }).join('') || `<div class="schd-week-none">${f._publicHours ? 'No public hours' : 'Free'}</div>`;
 
     return `<div class="schd-week-col${isToday?' is-today':''}">
-      <div class="schd-week-day-label">${DAY_NAMES[isoWeekday(ds)]}${isToday?' ·':''}</div>
+      <div class="schd-week-day-label">${DAY_NAMES[d.getDay()]}${isToday?' ·':''}</div>
       ${blocks}
     </div>`;
   }).join('');
@@ -3249,10 +3224,10 @@ function renderSchdWeek(f, prefixHtml = '', suffixHtml = '') {
 function renderSchdMonth(f, prefixHtml = '', suffixHtml = '') {
   const el = document.getElementById('schd-body');
   if (!el) return;
-  if (!S.monthViewDate) S.monthViewDate = nycMonthStart();
+  if (!S.monthViewDate) S.monthViewDate = new Date();
   const year  = S.monthViewDate.getFullYear();
   const month = S.monthViewDate.getMonth();
-  const todayStr = today();
+  const todayStr = new Date().toISOString().split('T')[0];
   const firstDay = new Date(year, month, 1);
   const lastDay  = new Date(year, month + 1, 0);
   const offset   = firstDay.getDay();
@@ -3264,7 +3239,8 @@ function renderSchdMonth(f, prefixHtml = '', suffixHtml = '') {
   let cells = '';
   for (let i = 0; i < total; i++) {
     const dayNum = i - offset + 1;
-    const ds = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+    const d  = new Date(year, month, dayNum);
+    const ds = d.toISOString().split('T')[0];
     const inMonth = dayNum >= 1 && dayNum <= lastDay.getDate();
     if (!inMonth) { cells += `<div class="schd-month-day other-month"></div>`; continue; }
     const dayPermits = f.permits.filter(p => permitDate(p) === ds);
@@ -3296,7 +3272,7 @@ function renderSchdMonth(f, prefixHtml = '', suffixHtml = '') {
 }
 
 function schdMonthNav(dir) {
-  if (!S.monthViewDate) S.monthViewDate = nycMonthStart();
+  if (!S.monthViewDate) S.monthViewDate = new Date();
   S.monthViewDate = new Date(S.monthViewDate.getFullYear(), S.monthViewDate.getMonth() + dir, 1);
   renderSchdBody();
 }

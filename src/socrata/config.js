@@ -28,25 +28,13 @@ const SYNC_WINDOW_DAYS = 90;
 // Socrata's default/anonymous page size is small; page explicitly so a
 // popular sport's citywide 90-day window is never silently truncated at
 // whatever the platform default happens to be.
-//
-// 10,000, not 1,000: every page is a Cloudflare subrequest, and the whole
-// Socrata tick shares the Workers Free plan's 50-per-invocation budget with
-// the delete + insert + meta writes (3 per sport). At 1,000 rows a page the
-// 2026-10 window needed 54 subrequests (soccer alone was 15 pages), so the
-// last sport in TRACKED_SPORTS (rugby) failed every run with "Too many
-// subrequests" and its cache silently stopped updating on 2026-10-05. At
-// 10,000 the same window is 33. Confirmed live: tvpp-9vvx serves a full
-// 10,000-row page (~3.9 MB, ~2 s).
-const PAGE_SIZE = 10000;
+const PAGE_SIZE = 1000;
 
 // Safety valve: if a single sport's window somehow needs more than this
-// many pages (50,000 rows) in one run, stop, keep whatever was fetched so
+// many pages (20,000 rows) in one run, stop, keep whatever was fetched so
 // far, and log an explicit "possible truncation" anomaly rather than
 // looping indefinitely against a misbehaving/unexpectedly huge response.
-// Kept low because a 10,000-row page is ~3.9 MB of JSON: much past 50,000
-// rows, a runaway response would hit the Worker's 128 MB memory limit
-// before this valve tripped. The real soccer window is ~15,000 rows.
-const MAX_PAGES_PER_SPORT = 5;
+const MAX_PAGES_PER_SPORT = 20;
 
 // Retry/backoff for 429 (rate limited) / 5xx responses.
 const MAX_FETCH_RETRIES = 3;

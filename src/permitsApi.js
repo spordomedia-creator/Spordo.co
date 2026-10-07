@@ -7,12 +7,10 @@
  * rather than an error.
  */
 
-import { nycDateIso, addDaysIso } from "./nycTime.js";
-
 const PERMIT_HORIZON_DAYS = 14;
 const MAX_PERMITS_RETURNED = 50;
 
-async function handlePermitsRequest(env, fieldId, { now = new Date() } = {}) {
+async function handlePermitsRequest(env, fieldId) {
   if (!env.DB) {
     return jsonResponse({ error: "DB (D1 binding) is not configured" }, 500);
   }
@@ -20,12 +18,10 @@ async function handlePermitsRequest(env, fieldId, { now = new Date() } = {}) {
     return jsonResponse({ error: "missing field id" }, 400);
   }
 
-  // New York's date, not UTC's: permit_date is an NYC calendar date, and the
-  // UTC date is already tomorrow from 8pm ET -- which dropped tonight's
-  // bookings and flagged a field "stale" on Saturday nights when the week's
-  // last cached day was still today in New York.
-  const todayStr = nycDateIso(now);
-  const horizonStr = addDaysIso(todayStr, PERMIT_HORIZON_DAYS);
+  const today = new Date();
+  const todayStr = today.toISOString().split("T")[0];
+  const horizon = new Date(today.getTime() + PERMIT_HORIZON_DAYS * 86400000);
+  const horizonStr = horizon.toISOString().split("T")[0];
 
   const [metaResult, permitsResult, coverageResult] = await Promise.all([
     env.DB.prepare(

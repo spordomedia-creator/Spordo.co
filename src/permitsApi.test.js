@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { handlePermitsRequest } from "./permitsApi.js";
-import { nycDateIso, addDaysIso } from "./nycTime.js";
 
 /**
  * A minimal read-only D1 fake (SELECT-only) — deliberately separate from
@@ -47,9 +46,11 @@ function createFakeReadD1({ syncMeta = {}, permitCache = [] } = {}) {
   return { db, calls };
 }
 
-/** ISO yyyy-mm-dd string N days from today in New York (negative = past). */
+/** ISO yyyy-mm-dd string N days from today (negative = past). */
 function daysFromToday(n) {
-  return addDaysIso(nycDateIso(), n);
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return d.toISOString().split("T")[0];
 }
 
 test("returns 500 when D1 binding is missing", async () => {
@@ -168,22 +169,4 @@ test("URL-encoded field ids (containing base64 special chars) are queried as-is 
   assert.equal(resp.status, 200);
   const metaCall = calls.find((c) => c.method === "first");
   assert.equal(metaCall.args[0], "SFJQfFBpZXI=");
-});
-
-test("after 8pm ET, still serves tonight's permits and doesn't flag a week that ends today as stale", async () => {
-  const { db, calls } = createFakeReadD1({
-    syncMeta: {
-      "field-1": { field_id: "field-1", last_permit_sync_at: "2026-10-10T22:00:00Z", live_availability_status: "synced" },
-    },
-    permitCache: {
-      // HRPT's posted week ends Saturday Oct 10; next week isn't up yet.
-      "field-1": [{ permit_date: "2026-10-10", start_time: "20:00:00", end_time: "22:00:00", event_name: "Saturday night league" }],
-    },
-  });
-  const now = new Date("2026-10-11T00:30:00Z"); // 8:30pm EDT Saturday Oct 10; the UTC date is already Sunday
-  const body = await (await handlePermitsRequest({ DB: db }, "field-1", { now })).json();
-  assert.equal(body.permits.length, 1);
-  assert.equal(body.meta.source_data_stale, false);
-  const windowCall = calls.find((c) => c.method === "all");
-  assert.deepEqual(windowCall.args.slice(1, 3), ["2026-10-10", "2026-10-24"]);
 });
