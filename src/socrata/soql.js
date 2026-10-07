@@ -56,7 +56,12 @@ function buildSportPageUrl(sport, { minDateIso, maxDateIso, offset = 0, limit = 
     $limit: String(limit),
     $offset: String(offset),
     $where: where,
-    $order: "start_date_time ASC",
+    // `:id` (Socrata's row id) breaks ties. Ordered by start_date_time alone,
+    // rows sharing a start time can land on either side of a page boundary
+    // from one request to the next; checked live 2026-10-07, the soccer
+    // window paged at 1,000 lost 2 rows and repeated 2 others. With the
+    // tiebreak the pages match a single unpaged request exactly.
+    $order: "start_date_time ASC, :id ASC",
   });
   return `${SOCRATA_BASE_URL}?${params.toString()}`;
 }
