@@ -9,6 +9,7 @@
  */
 
 import { SOCRATA_BASE_URL, PAGE_SIZE } from "./config.js";
+import { nycDateIso, addDaysIso } from "../nycTime.js";
 
 /** Escape a value being interpolated into a SoQL string literal. */
 function escapeSoqlString(value) {
@@ -16,18 +17,18 @@ function escapeSoqlString(value) {
 }
 
 /**
- * ISO date-only string (YYYY-MM-DD), UTC — matches public/TrueSpordo.html's
- * `today()`/`daysFrom(n)` helpers exactly so the sync window lines up with
- * what the live frontend used to request.
+ * ISO date-only string (YYYY-MM-DD) for `date`'s calendar day in New York --
+ * tvpp-9vvx's floating timestamps are NYC local time. This used to be the
+ * UTC date, which from 8pm ET onward is already tomorrow. Matches
+ * public/TrueSpordo.html's `today()`/`daysFrom(n)` helpers so the sync
+ * window lines up with what the frontend asks for.
  */
 function isoDateOnly(date) {
-  return date.toISOString().split("T")[0];
+  return nycDateIso(date);
 }
 
 function daysFromIsoDate(date, n) {
-  const d = new Date(date.getTime());
-  d.setUTCDate(d.getUTCDate() + n);
-  return isoDateOnly(d);
+  return addDaysIso(nycDateIso(date), n);
 }
 
 /**
@@ -55,7 +56,12 @@ function buildSportPageUrl(sport, { minDateIso, maxDateIso, offset = 0, limit = 
     $limit: String(limit),
     $offset: String(offset),
     $where: where,
-    $order: "start_date_time ASC",
+    // `:id` (Socrata's row id) breaks ties. Ordered by start_date_time alone,
+    // rows sharing a start time can land on either side of a page boundary
+    // from one request to the next; checked live 2026-10-07, the soccer
+    // window paged at 1,000 lost 2 rows and repeated 2 others. With the
+    // tiebreak the pages match a single unpaged request exactly.
+    $order: "start_date_time ASC, :id ASC",
   });
   return `${SOCRATA_BASE_URL}?${params.toString()}`;
 }
