@@ -21,7 +21,6 @@ import {
   HRPT_IMAGE_MAX_INDEX,
   HRPT_IMAGE_URL_RE,
 } from "./config.js";
-import { nycDateIso } from "../nycTime.js";
 
 /** The Sunday (00:00) that begins the schedule week containing `date`. */
 function weekSunday(date) {
@@ -102,11 +101,7 @@ async function fetchWeekImages(opts = {}) {
   const fetchImpl = opts.fetchImpl || fetch;
   const now = opts.now ? opts.now() : new Date();
   const anomalies = [];
-  // The week containing today in New York. weekSunday works in UTC, and the
-  // 00:00Z and 03:00Z ticks fall on Saturday evening ET, when the UTC date is
-  // already Sunday -- which named NEXT week (an unposted fallback week, and
-  // the wrong dates for any image whose filename has no date).
-  const sunday = weekSunday(new Date(`${nycDateIso(now)}T00:00:00Z`));
+  const sunday = weekSunday(now);
   const sundayIso = isoDate(sunday);
 
   // Primary: scrape the live page for the real image URLs.

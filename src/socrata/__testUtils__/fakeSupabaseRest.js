@@ -2,13 +2,7 @@
  * A minimal in-memory fake of the Supabase PostgREST HTTP surface that
  * src/socrata/supabaseClient.js and src/socrataPermitsApi.js actually call:
  * DELETE/POST to /rest/v1/<table> with `eq.`/`gte.`/`lte.` filters, and GET
- * with `select=`/`order=`/`limit=`/`offset=` (+ `Prefer: count=exact`).
- *
- * GET models Supabase's "Max rows" cap (`maxRows`, 1,000 by default like a
- * real project): no response carries more rows than that, whatever `limit`
- * asks for, and Content-Range reports what was returned. The old fake applied
- * `limit` as-is, which is how a single `limit=20000` read passed every test
- * here while production silently got the first 1,000 rows.
+ * with `select=`/`order=`/`limit=`.
  *
  * Same caveat as src/hrpt/__testUtils__/fakeD1.js: this is NOT a real
  * Postgres/PostgREST implementation. It recognizes only the exact filter
@@ -19,7 +13,7 @@
  * (e.g. no real RLS enforcement, no real UNIQUE constraint errors).
  */
 
-function createFakeSupabaseRest({ baseUrl = "https://fake.supabase.co", failTables = [], maxRows = 1000 } = {}) {
+function createFakeSupabaseRest({ baseUrl = "https://fake.supabase.co", failTables = [] } = {}) {
   const tables = {
     field_permit_cache: [],
     field_sync_meta: [],
@@ -28,8 +22,8 @@ function createFakeSupabaseRest({ baseUrl = "https://fake.supabase.co", failTabl
 
   function parseFilters(searchParams) {
     // Returns a list of { column, op, value } for every `eq./gte./lte.`
-    // style filter param (ignores select/order/limit/offset/on_conflict).
-    const reserved = new Set(["select", "order", "limit", "offset", "on_conflict"]);
+    // style filter param (ignores select/order/limit/on_conflict).
+    const reserved = new Set(["select", "order", "limit", "on_conflict"]);
     const filters = [];
     for (const [key, raw] of searchParams.entries()) {
       if (reserved.has(key)) continue;
@@ -94,31 +88,17 @@ function createFakeSupabaseRest({ baseUrl = "https://fake.supabase.co", failTabl
       let rows = tables[table].filter((row) => rowMatches(row, filters));
       const order = u.searchParams.get("order");
       if (order) {
-        // "col.dir[,col.dir...]". Array sort is stable, so full ties keep insertion order.
-        const keys = order.split(",").map((part) => part.split("."));
-        rows = [...rows].sort((a, b) => {
-          for (const [col, dir] of keys) {
-            const cmp = a[col] > b[col] ? 1 : a[col] < b[col] ? -1 : 0;
-            if (cmp) return dir === "desc" ? -cmp : cmp;
-          }
-          return 0;
-        });
+        const [col, dir] = order.split(".");
+        rows = [...rows].sort((a, b) => (a[col] > b[col] ? 1 : a[col] < b[col] ? -1 : 0) * (dir === "desc" ? -1 : 1));
       }
-      const total = rows.length;
-      const offset = Number(u.searchParams.get("offset") || 0);
-      const limit = u.searchParams.get("limit") ? Number(u.searchParams.get("limit")) : Infinity;
-      rows = rows.slice(offset, offset + Math.min(limit, maxRows));
+      const limit = u.searchParams.get("limit");
+      if (limit) rows = rows.slice(0, Number(limit));
       const select = u.searchParams.get("select");
       if (select) {
         const cols = select.split(",");
         rows = rows.map((r) => Object.fromEntries(cols.map((c) => [c, r[c] ?? null])));
       }
-      const counted = /count=exact/.test((init.headers && init.headers.Prefer) || "");
-      const range = `${rows.length ? `${offset}-${offset + rows.length - 1}` : "*"}/${counted ? total : "*"}`;
-      return new Response(JSON.stringify(rows), {
-        status: 200,
-        headers: { "Content-Type": "application/json", "Content-Range": range },
-      });
+      return { ok: true, status: 200, json: async () => rows, text: async () => JSON.stringify(rows) };
     }
 
     return { ok: false, status: 405, text: async () => `unsupported method ${method}` };
