@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { handleSocrataPermitsRequest, PAGE_LIMIT, MAX_PAGES, joinJsonArrays, parseContentRange } from "./socrataPermitsApi.js";
+import { handleSocrataPermitsRequest, PAGE_LIMIT, MAX_PAGES, PAGE_CONCURRENCY, joinJsonArrays, parseContentRange } from "./socrataPermitsApi.js";
 import { createFakeSupabaseRest } from "./socrata/__testUtils__/fakeSupabaseRest.js";
 
 const env = { SUPABASE_URL: "https://fake.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "svc-key" };
@@ -201,4 +201,48 @@ test("a partial response is never cacheable; a complete one keeps the short publ
   const ok = await handleSocrataPermitsRequest(env, { sport: "soccer" }, fake.fetchImpl);
   assert.equal(ok.headers.get("X-Spordo-Truncated"), "false");
   assert.equal(ok.headers.get("Cache-Control"), "public, max-age=300");
+});
+
+// Wraps a fetchImpl the way Cloudflare's runtime behaves: a response counts as
+// an open connection until its body is read, and past `limit` open at once
+// the request fails ("Response closed due to connection limit" in production).
+function connectionLimitedFetch(inner, limit = 6) {
+  let open = 0;
+  let peak = 0;
+  const fetchImpl = async (url, init) => {
+    open += 1;
+    peak = Math.max(peak, open);
+    if (open > limit) {
+      open -= 1;
+      throw new Error("Response closed due to connection limit");
+    }
+    const resp = await inner(url, init);
+    let released = false;
+    const release = () => {
+      if (!released) {
+        released = true;
+        open -= 1;
+      }
+    };
+    const read = (method) => async () => {
+      try {
+        return await resp[method]();
+      } finally {
+        release();
+      }
+    };
+    return { ok: resp.ok, status: resp.status, headers: resp.headers || new Headers(), arrayBuffer: read("arrayBuffer"), json: read("json"), text: read("text") };
+  };
+  return { fetchImpl, peak: () => peak };
+}
+
+test("never holds more than 6 Supabase connections open at once (Cloudflare's per-request limit; #41 hit it in production)", async () => {
+  const fake = createFakeSupabaseRest();
+  fake.tables.field_permit_cache.push(...upcomingSoccerRows(25000)); // 25 pages at the 1,000-row cap
+  const limited = connectionLimitedFetch(fake.fetchImpl, 6);
+
+  const resp = await handleSocrataPermitsRequest(env, { sport: "soccer" }, limited.fetchImpl);
+  assert.equal(resp.status, 200);
+  assert.equal((await resp.json()).length, 25000);
+  assert.ok(limited.peak() <= PAGE_CONCURRENCY, `peak open connections was ${limited.peak()}`);
 });
