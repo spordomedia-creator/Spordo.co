@@ -201,7 +201,7 @@ test("no images fetchable: aborts, cache left untouched", async () => {
   const summary = await runHrptSync({ DB: db }, { fetchImpl, readImage, apiKey: "sk-test", now: () => REFERENCE_DATE, log: silentLog() });
 
   assert.equal(summary.ok, false);
-  assert.match(summary.reason, /no schedule images/);
+  assert.match(summary.reason, /no schedule tables or images/);
   assert.equal(seen.length, 0);
   assert.equal(d1Calls.length, 0);
 });
@@ -251,4 +251,49 @@ test("a D1 write failure does not persist the manifest hash (so the next run ret
   assert.equal(summary.fieldsWritten, 0);
   assert.ok(summary.anomalies.some((a) => a.includes("write failed")));
   assert.ok(!tables.field_sync_meta.some((r) => r.field_id === HRPT_MANIFEST_META_ID), "manifest must not be stored after a failed run");
+});
+
+// ── Table format (HRPT went back to HTML tables in late Sep 2026) ──────────
+import { readFileSync } from "node:fs";
+const TABLES_HTML = readFileSync(new URL("./__fixtures__/weekly-tables-2026-10.html", import.meta.url), "utf8");
+const OCT_REFERENCE = new Date("2026-10-07T13:00:00Z");
+
+test("tables on the page: parses them, writes each field's 8-day window, never calls vision", async () => {
+  const fetchImpl = async (url) =>
+    url.includes("/permits/fields")
+      ? { ok: true, status: 200, headers: { get: () => "text/html" }, text: async () => TABLES_HTML }
+      : { ok: false, status: 404, headers: { get: () => null } };
+  const { readImage, seen } = defaultReadImage();
+  const { db, tables } = createFakeD1();
+
+  const summary = await runHrptSync({ DB: db }, { fetchImpl, readImage, apiKey: "sk-test", now: () => OCT_REFERENCE, log: silentLog() });
+
+  assert.equal(summary.ok, true);
+  assert.equal(summary.source, "tables");
+  assert.equal(summary.fieldsWritten, 2);
+  assert.equal(seen.length, 0, "no paid vision reads when tables exist");
+  const pier26 = EXACT_NAME_TO_FIELD_ID["Pier 26 Sports Court"];
+  const rows = tables.field_permit_cache.filter((r) => r.field_id === pier26 && r.permit_date === "2026-10-07");
+  assert.deepEqual(
+    rows.map((r) => [r.start_time, r.end_time, r.event_name]),
+    [["09:00:00", "12:00:00", "Permitted"], ["16:00:00", "17:30:00", "Permitted"], ["18:00:00", "19:30:00", "Permitted"]]
+  );
+  const gansevoortMeta = tables.field_sync_meta.find((m) => m.field_id === EXACT_NAME_TO_FIELD_ID["Gansevoort Peninsula Playing Field"]);
+  assert.equal(gansevoortMeta.live_availability_status, "synced");
+});
+
+test("blocked permits page (Cloudflare 403): says so in the failure reason, cache untouched", async () => {
+  const blockedHtml = "<title>Attention Required! | Cloudflare</title><h1>Sorry, you have been blocked</h1>";
+  const fetchImpl = async (url) =>
+    url.includes("/permits/fields")
+      ? { ok: false, status: 403, headers: { get: () => "text/html" }, text: async () => blockedHtml }
+      : { ok: false, status: 404, headers: { get: () => null } };
+  const { readImage } = defaultReadImage();
+  const { db, calls: d1Calls } = createFakeD1();
+
+  const summary = await runHrptSync({ DB: db }, { fetchImpl, readImage, apiKey: "sk-test", now: () => OCT_REFERENCE, log: silentLog() });
+
+  assert.equal(summary.ok, false);
+  assert.match(summary.reason, /blocked the permits page \(HTTP 403\)/);
+  assert.equal(d1Calls.length, 0);
 });

@@ -216,7 +216,7 @@ body::after {
 .hero-img {
   position: absolute; inset: 0;
   background:
-    url('/images/hero-bg.jpg') center 55%/cover no-repeat;
+    url('/images/hero-watercolor.webp') center 60%/cover no-repeat;
 }
 .hero-img::after {
   content: '';

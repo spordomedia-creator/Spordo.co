@@ -3162,7 +3162,7 @@ function renderSchdDay(f) {
     const height = Math.max(hourH * 0.5, (eh - sh) * hourH - 2);
     const holder = permitDisplayName(p);
     const badge  = permitTypeBadge(p);
-    const fmt = h => h < 12 ? `${h}am` : h === 12 ? '12pm' : `${h-12}pm`;
+    const fmt = h => h < 12 ? `${h}am` : h === 12 ? '12pm' : h >= 24 ? '12am' : `${h-12}pm`;
     return `<div class="schd-permit-block${p._open ? ' is-open' : ''}" style="top:${top}px;height:${height}px">
       <div class="permit-org-row">${badge}<div class="schd-permit-name">${esc(holder)}</div></div>
       <div class="schd-permit-time">${fmt(sh)} – ${fmt(eh)}</div>
@@ -3199,7 +3199,7 @@ function renderSchdWeek(f, prefixHtml = '', suffixHtml = '') {
     const ds = d.toISOString().split('T')[0];
     const dayP = f.permits.filter(p => permitDate(p) === ds);
     const isToday = i === 0;
-    const fmt = h => h < 12 ? `${h}am` : h === 12 ? '12pm' : `${h-12}pm`;
+    const fmt = h => h < 12 ? `${h}am` : h === 12 ? '12pm' : h >= 24 ? '12am' : `${h-12}pm`;
 
     const blocks = dayP.map(p => {
       const sh = permitStartHour(p), eh = permitEndHour(p);
@@ -3248,7 +3248,7 @@ function renderSchdMonth(f, prefixHtml = '', suffixHtml = '') {
     const isToday = ds === todayStr;
     // Show up to 3 permit names as mini-labels
     const miniLabels = dayPermits.slice(0, 2).map(p => {
-      const fmt = h => h >= 99 ? '' : (h < 12 ? `${h}am` : h === 12 ? '12pm' : `${h-12}pm`);
+      const fmt = h => h >= 99 ? '' : (h < 12 ? `${h}am` : h === 12 ? '12pm' : h >= 24 ? '12am' : `${h-12}pm`);
       const sh = permitStartHour(p);
       return `<div class="schd-month-permit-count">${fmt(sh)} ${esc(permitDisplayName(p)).slice(0,12)}</div>`;
     }).join('');
