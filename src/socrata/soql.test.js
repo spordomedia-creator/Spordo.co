@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { escapeSoqlString, isoDateOnly, daysFromIsoDate, buildSportWhereClause, buildSportPageUrl } from "./soql.js";
+import { PAGE_SIZE } from "./config.js";
 
 test("escapeSoqlString doubles single quotes", () => {
   assert.equal(escapeSoqlString("O'Brien"), "O''Brien");
@@ -47,7 +48,8 @@ test("buildSportPageUrl includes $limit/$offset/$where/$order and points at the 
   const parsed = new URL(url);
   assert.equal(parsed.searchParams.get("$limit"), "1000");
   assert.equal(parsed.searchParams.get("$offset"), "1000");
-  assert.equal(parsed.searchParams.get("$order"), "start_date_time ASC");
+  // :id tiebreak keeps paging stable when many rows share a start time.
+  assert.equal(parsed.searchParams.get("$order"), "start_date_time ASC, :id ASC");
   assert.match(parsed.searchParams.get("$where"), /SOCCER/);
 });
 
@@ -55,5 +57,5 @@ test("buildSportPageUrl defaults offset to 0 and limit to PAGE_SIZE", () => {
   const url = buildSportPageUrl({ id: "soccer", eventNameLike: "SOCCER" }, { minDateIso: "2026-08-22", maxDateIso: "2026-11-20" });
   const parsed = new URL(url);
   assert.equal(parsed.searchParams.get("$offset"), "0");
-  assert.equal(parsed.searchParams.get("$limit"), "1000");
+  assert.equal(parsed.searchParams.get("$limit"), String(PAGE_SIZE));
 });
