@@ -1,11 +1,13 @@
 /**
- * HRPT permit-schedule sync: discover images -> read with vision -> map -> upsert.
+ * HRPT permit-schedule sync: fetch page -> parse tables (or read images) -> map -> upsert.
  *
- * HRPT replaced its HTML permit tables with weekly JPG graphics (one per field),
- * so the old HTML-table parser reads nothing. This pipeline instead fetches the
- * week's schedule images and reads each with a vision model (see imageSource.js
- * and visionParser.js), then writes to the same `field_permit_cache` /
- * `field_sync_meta` tables as before.
+ * HRPT has published its weekly schedules in two formats and has switched
+ * between them: HTML tables (until mid-2026, and again from late Sep 2026)
+ * and weekly JPG graphics (mid-2026). Each run therefore tries the TABLES
+ * first (free, exact — see tableParser.js) and only falls back to the image
+ * pipeline (paid vision reads — see imageSource.js / visionParser.js) when
+ * the page has no schedule tables. Both write the same `field_permit_cache` /
+ * `field_sync_meta` tables.
  *
  * Integrity rules (unchanged from the table era):
  *   - A failed or empty fetch NEVER touches the cache. We only mutate a field's
@@ -20,6 +22,7 @@
 
 import {
   HRPT_PERMITS_URL,
+  HRPT_FETCH_HEADERS,
   HRPT_SOURCE_LABEL,
   FIELD_PERMIT_CACHE_TABLE,
   FIELD_SYNC_META_TABLE,
@@ -30,6 +33,7 @@ import { replaceFieldPermitWindow, upsertSyncMeta, getSyncMetaRow } from "./d1Cl
 import { fetchWeekImages, weekIsoFromUrl, dateForDayIndex, sha256Hex } from "./imageSource.js";
 import { readScheduleImage, DAY_KEYS } from "./visionParser.js";
 import { parseExplicitRangeLabel, formatTime } from "./dateTime.js";
+import { parseHrptScheduleTables } from "./tableParser.js";
 
 /**
  * @param {any} env Worker env (env.DB — D1 binding; env.ANTHROPIC_API_KEY — vision key)
@@ -57,14 +61,48 @@ async function runHrptSync(env, opts = {}) {
     reason: null,
   };
 
-  // 1. Discover + fetch this week's schedule images.
+  // 0. Tables first: fetch the page once and parse any schedule tables.
+  const page = await fetchPermitsPage(fetchImpl);
+  if (page.blocked) {
+    // Cloudflare bot protection on hudsonriverpark.org (seen from a residential
+    // IP since ~Oct 2026). Say so plainly — it reads very differently from
+    // "page structure changed" when it shows up in a Slack alert.
+    const msg = `HRPT blocked the permits page request (HTTP ${page.status} bot-protection page)`;
+    summary.anomalies.push(msg);
+    log.error(`[hrpt-sync] ${msg}`);
+  } else if (page.error) {
+    summary.anomalies.push(`permits page fetch failed: ${page.error}`);
+    log.warn(`[hrpt-sync] permits page fetch failed: ${page.error}`);
+  }
+  if (page.html) {
+    const parsedTables = parseHrptScheduleTables(page.html, { referenceDate: now() });
+    if (parsedTables.fields.length > 0) {
+      summary.source = "tables";
+      summary.anomalies.push(...parsedTables.anomalies);
+      for (const a of parsedTables.anomalies) log.warn(`[hrpt-sync] ${a}`);
+      for (const field of parsedTables.fields) {
+        await writeFieldWeek(env, summary, log, {
+          nameOnPage: field.fieldNameOnPage,
+          minDate: field.minDate,
+          maxDate: field.maxDate,
+          rows: field.rows.map((r) => ({ ...r, event_name: "Permitted" })),
+        });
+      }
+      await writeNoPermitScheduleMeta(env, summary, log);
+      return finalize(summary);
+    }
+  }
+
+  // 1. No tables on the page: discover + fetch this week's schedule images.
   const { images, sundayIso, source, anomalies } = await fetchWeekImages({ fetchImpl, now });
   summary.source = source;
   summary.imagesFound = images.length;
   summary.anomalies.push(...anomalies);
   for (const a of anomalies) log.warn(`[hrpt-sync] ${a}`);
   if (images.length === 0) {
-    summary.reason = "no schedule images could be fetched — cache left untouched";
+    summary.reason = page.blocked
+      ? `HRPT blocked the permits page (HTTP ${page.status}) and no schedule images could be fetched — cache left untouched`
+      : "no schedule tables or images found on the permits page — cache left untouched";
     log.error(`[hrpt-sync] ${summary.reason}`);
     return summary;
   }
@@ -174,24 +212,7 @@ async function runHrptSync(env, opts = {}) {
 
   // 4. Fields that never have a bookable schedule (see fieldMap.js) — write
   // their meta every successful run so the frontend shows "open play".
-  for (const { fieldId, name } of NO_PERMIT_SCHEDULE_FIELDS) {
-    try {
-      await upsertSyncMeta(env, {
-        table: FIELD_SYNC_META_TABLE,
-        row: {
-          field_id: fieldId,
-          last_permit_sync_at: summary.fetchedAt,
-          live_availability_status: "no_permit_schedule",
-          permit_source_url: HRPT_PERMITS_URL,
-        },
-      });
-      summary.fieldsNoPermitSchedule.push(name);
-    } catch (err) {
-      const msg = `no-permit-schedule meta write failed for "${name}" (${fieldId}): ${err && err.message ? err.message : err}`;
-      summary.anomalies.push(msg);
-      log.error(`[hrpt-sync] ${msg}`);
-    }
-  }
+  await writeNoPermitScheduleMeta(env, summary, log);
 
   // 5. Persist the image-set hash — only after a pass that actually wrote data,
   // so a failed run retries next time instead of being skipped as "unchanged".
@@ -211,11 +232,100 @@ async function runHrptSync(env, opts = {}) {
     }
   }
 
+  return finalize(summary);
+}
+
+function finalize(summary) {
   summary.ok = summary.fieldsWritten > 0;
   if (!summary.ok && !summary.reason) {
     summary.reason = "no fields were successfully written (all unmapped, unreadable, or write-failed)";
   }
   return summary;
+}
+
+/**
+ * GET the permits page once. Never throws.
+ * `blocked` = Cloudflare's "Sorry, you have been blocked" / challenge page
+ * (HTTP 403/503 with that body), which hudsonriverpark.org started serving to
+ * non-browser clients in early Oct 2026.
+ */
+async function fetchPermitsPage(fetchImpl) {
+  try {
+    const resp = await fetchImpl(HRPT_PERMITS_URL, { headers: HRPT_FETCH_HEADERS });
+    const html = typeof resp.text === "function" ? await resp.text() : "";
+    if (!resp.ok) {
+      const blocked = /you have been blocked|Attention Required|cf-chl|challenge-platform/i.test(html);
+      return { status: resp.status, html: null, blocked, error: `HTTP ${resp.status}` };
+    }
+    return { status: resp.status, html, blocked: false, error: null };
+  } catch (err) {
+    return { status: 0, html: null, blocked: false, error: err && err.message ? err.message : String(err) };
+  }
+}
+
+/** Map one field's page name to its id and replace its week window. Logs, never throws. */
+async function writeFieldWeek(env, summary, log, { nameOnPage, minDate, maxDate, rows }) {
+  const cleanName = nameOnPage.replace(/\s+weekly schedule$/i, "").trim();
+  const resolved = resolveFieldId(cleanName);
+  if (!resolved) {
+    const msg = `unmapped HRPT field name "${nameOnPage}" — no fieldMap entry; left untouched`;
+    summary.anomalies.push(msg);
+    summary.fieldsUnmapped.push(nameOnPage);
+    log.warn(`[hrpt-sync] ${msg}`);
+    return;
+  }
+  if (resolved.matchType === "alias") {
+    log.info(`[hrpt-sync] resolved "${cleanName}" via provisional alias -> ${resolved.fieldId} (see fieldMap.js ALIASES)`);
+  }
+  try {
+    // Replace the whole window even when rows is empty — a field with no
+    // bookings this week is a legitimate "fully available" result.
+    const result = await replaceFieldPermitWindow(env, {
+      table: FIELD_PERMIT_CACHE_TABLE,
+      fieldId: resolved.fieldId,
+      minDate,
+      maxDate,
+      rows: rows.map((r) => ({ field_id: resolved.fieldId, ...r })),
+    });
+    await upsertSyncMeta(env, {
+      table: FIELD_SYNC_META_TABLE,
+      row: {
+        field_id: resolved.fieldId,
+        last_permit_sync_at: summary.fetchedAt,
+        live_availability_status: "synced",
+        permit_source_url: HRPT_PERMITS_URL,
+      },
+    });
+    summary.fieldsWritten += 1;
+    summary.rowsInserted += result.inserted;
+    log.info(`[hrpt-sync] ${cleanName} (${resolved.fieldId}): wrote ${result.inserted} permit block(s) for ${minDate}..${maxDate}`);
+  } catch (err) {
+    const msg = `write failed for "${cleanName}" (${resolved.fieldId}): ${err && err.message ? err.message : err}`;
+    summary.anomalies.push(msg);
+    log.error(`[hrpt-sync] ${msg}`);
+  }
+}
+
+/** Fields that never have a bookable schedule (see fieldMap.js) — refresh their meta each run. */
+async function writeNoPermitScheduleMeta(env, summary, log) {
+  for (const { fieldId, name } of NO_PERMIT_SCHEDULE_FIELDS) {
+    try {
+      await upsertSyncMeta(env, {
+        table: FIELD_SYNC_META_TABLE,
+        row: {
+          field_id: fieldId,
+          last_permit_sync_at: summary.fetchedAt,
+          live_availability_status: "no_permit_schedule",
+          permit_source_url: HRPT_PERMITS_URL,
+        },
+      });
+      summary.fieldsNoPermitSchedule.push(name);
+    } catch (err) {
+      const msg = `no-permit-schedule meta write failed for "${name}" (${fieldId}): ${err && err.message ? err.message : err}`;
+      summary.anomalies.push(msg);
+      log.error(`[hrpt-sync] ${msg}`);
+    }
+  }
 }
 
 export { runHrptSync, HRPT_SOURCE_LABEL };
