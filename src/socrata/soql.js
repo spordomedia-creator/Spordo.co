@@ -9,6 +9,7 @@
  */
 
 import { SOCRATA_BASE_URL, PAGE_SIZE } from "./config.js";
+import { nycDateIso, addDaysIso } from "../nycTime.js";
 
 /** Escape a value being interpolated into a SoQL string literal. */
 function escapeSoqlString(value) {
@@ -16,18 +17,18 @@ function escapeSoqlString(value) {
 }
 
 /**
- * ISO date-only string (YYYY-MM-DD), UTC — matches public/TrueSpordo.html's
- * `today()`/`daysFrom(n)` helpers exactly so the sync window lines up with
- * what the live frontend used to request.
+ * ISO date-only string (YYYY-MM-DD) for `date`'s calendar day in New York --
+ * tvpp-9vvx's floating timestamps are NYC local time. This used to be the
+ * UTC date, which from 8pm ET onward is already tomorrow. Matches
+ * public/TrueSpordo.html's `today()`/`daysFrom(n)` helpers so the sync
+ * window lines up with what the frontend asks for.
  */
 function isoDateOnly(date) {
-  return date.toISOString().split("T")[0];
+  return nycDateIso(date);
 }
 
 function daysFromIsoDate(date, n) {
-  const d = new Date(date.getTime());
-  d.setUTCDate(d.getUTCDate() + n);
-  return isoDateOnly(d);
+  return addDaysIso(nycDateIso(date), n);
 }
 
 /**

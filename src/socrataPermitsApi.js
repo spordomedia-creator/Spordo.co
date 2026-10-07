@@ -26,13 +26,14 @@
  */
 
 import { TRACKED_SPORT_IDS, FIELD_PERMIT_CACHE_TABLE, FIELD_SYNC_META_TABLE } from "./socrata/config.js";
+import { nycDateIso } from "./nycTime.js";
 
 const MAX_PERMITS_RETURNED = 20000; // generous cap; MAX_PAGES_PER_SPORT already bounds sync-time ingestion
 // Cron cadence is every 3h (see wrangler.jsonc); anything twice that old is
 // flagged stale rather than silently served as if it were fresh.
 const STALE_THRESHOLD_MS = 6 * 60 * 60 * 1000;
 
-async function handleSocrataPermitsRequest(env, { sport }, fetchImpl = fetch) {
+async function handleSocrataPermitsRequest(env, { sport, now = new Date() }, fetchImpl = fetch) {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
     return jsonResponse({ error: "Supabase is not configured (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)" }, 500);
   }
@@ -50,7 +51,9 @@ async function handleSocrataPermitsRequest(env, { sport }, fetchImpl = fetch) {
   // up. Without this floor, the ascending-order + PostgREST row cap would return
   // those stale past rows first and bury the fresh future data (observed live:
   // the cache served weeks-old permits while thousands of current ones existed).
-  const todayIso = new Date().toISOString().split("T")[0];
+  // "Today" is New York's date: start_date_time is NYC local time, and the UTC
+  // date is already tomorrow from 8pm ET, which dropped tonight's bookings.
+  const todayIso = nycDateIso(now);
   const permitsUrl =
     `${env.SUPABASE_URL}/rest/v1/${FIELD_PERMIT_CACHE_TABLE}` +
     `?source=eq.socrata&sport=eq.${encodeURIComponent(sport)}` +

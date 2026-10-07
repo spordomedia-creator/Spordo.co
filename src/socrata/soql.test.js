@@ -7,11 +7,17 @@ test("escapeSoqlString doubles single quotes", () => {
   assert.equal(escapeSoqlString("no quotes"), "no quotes");
 });
 
-test("isoDateOnly / daysFromIsoDate produce YYYY-MM-DD strings, UTC-based", () => {
-  const d = new Date("2026-08-22T23:59:59.000Z");
+test("isoDateOnly / daysFromIsoDate produce YYYY-MM-DD strings for the New York calendar day", () => {
+  const d = new Date("2026-08-22T23:59:59.000Z"); // 7:59pm EDT, same date in both zones
   assert.equal(isoDateOnly(d), "2026-08-22");
   assert.equal(daysFromIsoDate(d, 90), "2026-11-20");
   assert.equal(daysFromIsoDate(d, 0), "2026-08-22");
+});
+
+test("isoDateOnly stays on the New York date after 8pm ET, when UTC has already rolled over", () => {
+  const evening = new Date("2026-08-23T00:30:00.000Z"); // 8:30pm EDT on Aug 22
+  assert.equal(isoDateOnly(evening), "2026-08-22");
+  assert.equal(daysFromIsoDate(evening, 90), "2026-11-20");
 });
 
 test("buildSportWhereClause never includes a trailing Z on timestamps (Socrata rejects it)", () => {

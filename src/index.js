@@ -15,6 +15,7 @@ import { getFieldCoverage } from "./hrpt/d1Client.js";
 import { EXACT_NAME_TO_FIELD_ID } from "./hrpt/fieldMap.js";
 import { FIELD_PERMIT_CACHE_TABLE } from "./hrpt/config.js";
 import { sendSlackAlert, buildSyncFailureAlert, buildStalenessAlert } from "./alerting.js";
+import { nycDateIso } from "./nycTime.js";
 
 const PERMITS_API_PREFIX = "/api/permits/";
 const SOCRATA_PERMITS_API_PATH = "/api/permits";
@@ -111,8 +112,7 @@ export default {
         if (env.DB) {
           const fieldIds = Object.values(EXACT_NAME_TO_FIELD_ID);
           const coverage = await getFieldCoverage(env, { table: FIELD_PERMIT_CACHE_TABLE, fieldIds });
-          const todayStr = new Date().toISOString().split("T")[0];
-          const staleMsg = buildStalenessAlert("HRPT", coverage, todayStr);
+          const staleMsg = buildStalenessAlert("HRPT", coverage, nycDateIso());
           if (staleMsg) await sendSlackAlert(env.SLACK_ALERT_WEBHOOK_URL, staleMsg);
         }
       })

@@ -161,3 +161,15 @@ test("fetchWeekImages: nothing fetchable -> source 'none', empty images, anomaly
   assert.equal(images.length, 0);
   assert.ok(anomalies.length >= 1);
 });
+
+test("fetchWeekImages picks the New York week on Saturday evening, when the UTC date is already Sunday", async () => {
+  const fetchImpl = async (url) => {
+    if (url.includes("/permits/fields")) return fakeResponse({ contentType: "text/html", body: "<p>no images</p>" });
+    return fakeResponse({ contentType: "text/html", body: "not found" });
+  };
+  const { sundayIso } = await fetchWeekImages({
+    fetchImpl,
+    now: () => new Date("2026-09-20T00:30:00Z"), // 8:30pm EDT Saturday Sep 19 (00:00Z cron tick)
+  });
+  assert.equal(sundayIso, "2026-09-13"); // this week, not next (2026-09-20)
+});

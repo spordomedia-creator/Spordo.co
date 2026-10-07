@@ -65,3 +65,15 @@ test("returns 502 when the Supabase permits read fails", async () => {
   const resp = await handleSocrataPermitsRequest(env, { sport: "soccer" }, fetchImpl);
   assert.equal(resp.status, 502);
 });
+
+test("keeps tonight's permits after 8pm ET: the 'from today' floor is New York's date, not UTC's", async () => {
+  const { fetchImpl, tables } = createFakeSupabaseRest();
+  tables.field_permit_cache.push(
+    { source: "socrata", sport: "soccer", event_location: "Yesterday", start_date_time: "2026-10-06T21:00:00.000" },
+    { source: "socrata", sport: "soccer", event_location: "Tonight", start_date_time: "2026-10-07T21:00:00.000" },
+    { source: "socrata", sport: "soccer", event_location: "Tomorrow", start_date_time: "2026-10-08T09:00:00.000" }
+  );
+  const now = new Date("2026-10-08T00:30:00Z"); // 8:30pm EDT on Oct 7; the UTC date is already Oct 8
+  const body = await (await handleSocrataPermitsRequest(env, { sport: "soccer", now }, fetchImpl)).json();
+  assert.deepEqual(body.map((r) => r.event_location), ["Tonight", "Tomorrow"]);
+});
