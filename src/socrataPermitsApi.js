@@ -23,12 +23,44 @@
  * server-side borough filter) avoids a behavior change: if this route
  * filtered server-side, a borough switch after the initial load would
  * silently see fewer fields than it does today.
+ *
+ * Paging: Supabase caps every PostgREST read at the project's "Max rows"
+ * setting (1,000 by default) whatever `limit` asks for. This route used to
+ * send one `limit=20000` request and got back the first 1,000 rows, which
+ * for soccer was today only: on 2026-10-07 it served 1,000 of 28,848 cached
+ * rows, so every soccer field's week view showed "Free" from tomorrow on.
+ * It now asks for an exact count with the first page, then fetches the rest
+ * in parallel, and joins the pages as raw bytes (see joinJsonArrays).
+ *
+ * Duplicates: the cache currently holds many permits twice (two sync runs
+ * writing the same window at the same time). Rows pass through as-is here,
+ * since dropping them would mean parsing every row; the frontend drops exact
+ * duplicates in dedupePermits() (public/TrueSpordo.html).
  */
 
 import { TRACKED_SPORT_IDS, FIELD_PERMIT_CACHE_TABLE, FIELD_SYNC_META_TABLE } from "./socrata/config.js";
 import { nycDateIso } from "./nycTime.js";
 
-const MAX_PERMITS_RETURNED = 20000; // generous cap; MAX_PAGES_PER_SPORT already bounds sync-time ingestion
+// Rows asked for per page. Whatever the server actually returns for the first
+// page becomes the page size, so any Max rows setting pages right. Asking
+// above the default 1,000 changes nothing today (checked live: limit=10000
+// comes back as 0-999 of 28,848), but if Max rows is ever raised, soccer
+// drops from ~29 pages to 3 with no code change.
+const PAGE_LIMIT = 10000;
+// Each page is a subrequest, and the Workers Free plan allows 50 per request
+// (the meta read is one more). 40 pages is 40,000 rows at the default cap;
+// past that the response is served partial and flagged with
+// X-Spordo-Truncated: true, never passed off as complete.
+const MAX_PAGES = 40;
+// Pages in flight at once. A Worker may hold 6 connections open per request,
+// and once more are queued the runtime closes the ones whose bodies sit
+// unread. #41 started every page at once and read them all at the end, and
+// production answered 502 "Response closed due to connection limit"
+// (2026-10-07; local wrangler dev doesn't enforce the limit). So each page's
+// body is read as soon as it arrives, with at most this many in flight.
+const PAGE_CONCURRENCY = 4;
+const PERMIT_COLUMNS =
+  "event_location,event_borough,start_date_time,end_date_time,event_name,event_type,permit_holder_name,organization";
 // Cron cadence is every 3h (see wrangler.jsonc); anything twice that old is
 // flagged stale rather than silently served as if it were fresh.
 const STALE_THRESHOLD_MS = 6 * 60 * 60 * 1000;
@@ -58,29 +90,92 @@ async function handleSocrataPermitsRequest(env, { sport, now = new Date() }, fet
     `${env.SUPABASE_URL}/rest/v1/${FIELD_PERMIT_CACHE_TABLE}` +
     `?source=eq.socrata&sport=eq.${encodeURIComponent(sport)}` +
     `&start_date_time=gte.${encodeURIComponent(todayIso + "T00:00:00.000")}` +
-    `&select=event_location,event_borough,start_date_time,end_date_time,event_name,event_type,permit_holder_name,organization` +
-    `&order=start_date_time.asc&limit=${MAX_PERMITS_RETURNED}`;
+    `&select=${PERMIT_COLUMNS}` +
+    // `id` breaks ties, so every page sees the same row order. By
+    // start_date_time alone, rows sharing a start time can move across a
+    // page boundary between requests (repeated on one page, missing from
+    // the next).
+    `&order=start_date_time.asc,id.asc`;
 
   const metaUrl =
     `${env.SUPABASE_URL}/rest/v1/${FIELD_SYNC_META_TABLE}` +
     `?source=eq.socrata&scope=eq.${encodeURIComponent("sport:" + sport)}&select=last_synced_at,status,rows_synced,rows_dropped&limit=1`;
 
-  let permitsResp, metaResp;
+  let firstResp, metaResp;
   try {
-    [permitsResp, metaResp] = await Promise.all([fetchImpl(permitsUrl, { headers }), fetchImpl(metaUrl, { headers })]);
+    [firstResp, metaResp] = await Promise.all([
+      // count=exact puts the total row count in Content-Range, so the
+      // remaining page offsets are known up front.
+      fetchImpl(`${permitsUrl}&offset=0&limit=${PAGE_LIMIT}`, { headers: { ...headers, Prefer: "count=exact" } }),
+      fetchImpl(metaUrl, { headers }),
+    ]);
   } catch (err) {
-    return jsonResponse({ error: `Supabase request failed: ${err && err.message ? err.message : err}` }, 502);
+    return supabaseRequestFailed(err);
   }
 
-  if (!permitsResp.ok) {
-    return jsonResponse({ error: `Supabase read failed (${permitsResp.status}): ${await safeText(permitsResp)}` }, 502);
+  if (!firstResp.ok) {
+    await safeText(metaResp); // drain it so the connection is released
+    return supabaseReadFailed(firstResp);
   }
 
-  const permits = await permitsResp.json();
-  const metaRows = metaResp.ok ? await metaResp.json() : [];
-  const meta = metaRows[0] || null;
+  const range = parseContentRange(firstResp.headers.get("Content-Range"));
+  // Read both bodies before starting any more requests (see PAGE_CONCURRENCY).
+  // A missing or unreadable meta row only costs the staleness headers.
+  let pages, metaRows;
+  try {
+    [pages, metaRows] = await Promise.all([
+      firstResp.arrayBuffer().then((buf) => [new Uint8Array(buf)]),
+      metaResp.ok ? metaResp.json().catch(() => []) : safeText(metaResp).then(() => []),
+    ]);
+  } catch (err) {
+    return supabaseRequestFailed(err);
+  }
 
-  const extraHeaders = {};
+  let truncated;
+  if (!range || range.total === null) {
+    // PostgREST always sends the count when asked; without it there is no
+    // telling how much is missing, so say so instead of guessing.
+    truncated = "unknown";
+    console.warn(`[socrata-permits-api] sport=${sport}: no row count in Content-Range; serving the first page only`);
+  } else {
+    const offsets = [];
+    for (let offset = range.rows; range.rows > 0 && offset < range.total && offsets.length < MAX_PAGES - 1; offset += range.rows) {
+      offsets.push(offset);
+    }
+    try {
+      pages.push(
+        ...(await mapWithConcurrency(offsets, PAGE_CONCURRENCY, (offset) =>
+          fetchPageBytes(fetchImpl, `${permitsUrl}&offset=${offset}&limit=${range.rows}`, headers)
+        ))
+      );
+    } catch (err) {
+      return err instanceof SupabaseReadError ? jsonResponse({ error: err.message }, 502) : supabaseRequestFailed(err);
+    }
+    truncated = range.rows * pages.length < range.total;
+    if (truncated) {
+      console.warn(`[socrata-permits-api] sport=${sport}: ${range.total} rows exceed ${MAX_PAGES} pages of ${range.rows}; serving a partial window`);
+    }
+  }
+
+  let body;
+  try {
+    body = joinJsonArrays(pages);
+  } catch (err) {
+    return jsonResponse({ error: `Supabase read returned an unexpected body: ${err && err.message ? err.message : err}` }, 502);
+  }
+
+  const meta = (Array.isArray(metaRows) && metaRows[0]) || null;
+
+  const extraHeaders = { "X-Spordo-Truncated": String(truncated) };
+  if (truncated !== false) {
+    // A partial window must not stick in browser/edge caches for max-age;
+    // the next request should get a fresh try at the whole thing.
+    extraHeaders["Cache-Control"] = "no-store";
+  }
+  if (range && range.total !== null) {
+    // Cached rows from today on, before the frontend drops duplicates.
+    extraHeaders["X-Spordo-Total-Rows"] = String(range.total);
+  }
   if (meta && meta.last_synced_at) {
     const ageMs = Date.now() - new Date(meta.last_synced_at).getTime();
     extraHeaders["X-Spordo-Synced-At"] = meta.last_synced_at;
@@ -90,7 +185,98 @@ async function handleSocrataPermitsRequest(env, { sport, now = new Date() }, fet
     extraHeaders["X-Spordo-Stale"] = "unknown";
   }
 
-  return jsonResponse(permits, 200, extraHeaders);
+  return rawJsonResponse(body, 200, extraHeaders);
+}
+
+/**
+ * PostgREST Content-Range -> { rows, total }: rows in this response, and the
+ * total matching rows (null if not counted). Shapes: "0-999/28848" (counted),
+ * "0-999/" + "*" (not counted), and "*" + "/0" for an empty result. Returns
+ * null if the header is missing or unreadable.
+ */
+function parseContentRange(header) {
+  const m = /^\s*(?:(\d+)-(\d+)|\*)\/(\d+|\*)\s*$/.exec(header || "");
+  if (!m) return null;
+  return {
+    rows: m[1] === undefined ? 0 : Number(m[2]) - Number(m[1]) + 1,
+    total: m[3] === "*" ? null : Number(m[3]),
+  };
+}
+
+const JSON_OPEN = 0x5b; // [
+const JSON_CLOSE = 0x5d; // ]
+const JSON_COMMA = 0x2c; // ,
+
+function isJsonWhitespace(byte) {
+  return byte === 0x20 || byte === 0x0a || byte === 0x0d || byte === 0x09;
+}
+
+/**
+ * Join JSON-array bodies (as bytes) into one JSON array without parsing them.
+ * Parsing and re-serializing soccer's several MB of rows costs tens of
+ * milliseconds of CPU, and the Workers Free plan allows 10 ms per request;
+ * copying bytes costs next to nothing.
+ */
+function joinJsonArrays(bodies) {
+  const inners = [];
+  for (const bytes of bodies) {
+    let start = 0;
+    let end = bytes.length;
+    while (start < end && isJsonWhitespace(bytes[start])) start++;
+    while (end > start && isJsonWhitespace(bytes[end - 1])) end--;
+    if (end - start < 2 || bytes[start] !== JSON_OPEN || bytes[end - 1] !== JSON_CLOSE) {
+      throw new Error("page body is not a JSON array");
+    }
+    start++;
+    end--;
+    while (start < end && isJsonWhitespace(bytes[start])) start++;
+    while (end > start && isJsonWhitespace(bytes[end - 1])) end--;
+    if (start < end) inners.push(bytes.subarray(start, end));
+  }
+  const out = new Uint8Array(2 + inners.reduce((n, inner) => n + inner.length, 0) + Math.max(inners.length - 1, 0));
+  let pos = 0;
+  out[pos++] = JSON_OPEN;
+  inners.forEach((inner, i) => {
+    if (i > 0) out[pos++] = JSON_COMMA;
+    out.set(inner, pos);
+    pos += inner.length;
+  });
+  out[pos] = JSON_CLOSE;
+  return out;
+}
+
+/** A page request Supabase answered with a non-2xx status; message is the 502 text. */
+class SupabaseReadError extends Error {}
+
+/** Fetch one page and read its body straight away, releasing the connection. */
+async function fetchPageBytes(fetchImpl, url, headers) {
+  const resp = await fetchImpl(url, { headers });
+  if (!resp.ok) {
+    throw new SupabaseReadError(`Supabase read failed (${resp.status}): ${await safeText(resp)}`);
+  }
+  return new Uint8Array(await resp.arrayBuffer());
+}
+
+/** Map `items` through async `fn` with at most `limit` calls in flight; results keep input order. */
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+function supabaseRequestFailed(err) {
+  return jsonResponse({ error: `Supabase request failed: ${err && err.message ? err.message : err}` }, 502);
+}
+
+async function supabaseReadFailed(resp) {
+  return jsonResponse({ error: `Supabase read failed (${resp.status}): ${await safeText(resp)}` }, 502);
 }
 
 async function safeText(resp) {
@@ -102,7 +288,11 @@ async function safeText(resp) {
 }
 
 function jsonResponse(body, status = 200, extraHeaders = {}) {
-  return new Response(JSON.stringify(body), {
+  return rawJsonResponse(JSON.stringify(body), status, extraHeaders);
+}
+
+function rawJsonResponse(body, status = 200, extraHeaders = {}) {
+  return new Response(body, {
     status,
     headers: {
       "Content-Type": "application/json",
@@ -123,4 +313,4 @@ function jsonResponse(body, status = 200, extraHeaders = {}) {
   });
 }
 
-export { handleSocrataPermitsRequest, STALE_THRESHOLD_MS };
+export { handleSocrataPermitsRequest, STALE_THRESHOLD_MS, PAGE_LIMIT, MAX_PAGES, PAGE_CONCURRENCY, parseContentRange, joinJsonArrays };
