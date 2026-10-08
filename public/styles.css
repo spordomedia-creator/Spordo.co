@@ -2090,8 +2090,13 @@ body::after {
 .hot-title { font-family: var(--f-display); font-weight: 400; font-size: clamp(40px, 5vw, 64px); line-height: 0.9; letter-spacing: 0.03em; color: var(--c-white); margin-bottom: 32px; }
 .hot-title em { font-style: normal; color: var(--c-accent); }
 /* 3D cylinder carousel — vanilla port of 21st.dev's 3d-carousel */
+/* Stage height must clear the FRONT card as drawn: the 3D view enlarges it
+   (perspective 1000px, cylinder radius ~302px desktop / ~207px phone), so a
+   340px card renders 487px tall and a 270px phone card renders 340px. At the
+   old 440px / 340px the overflow:hidden cut off the top and bottom of the
+   front cards; these heights leave ~20px clear on each side. */
 .hot-stage {
-  position: relative; height: 440px; overflow: hidden;
+  position: relative; height: 530px; overflow: hidden;
   display: flex; align-items: center; justify-content: center;
   perspective: 1000px; cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none;
   outline: none; border-radius: 18px;
@@ -2173,7 +2178,7 @@ body::after {
   .hot-kicker, .hot-title { padding: 0 24px; }
 }
 @media (max-width: 640px) {
-  .hot-stage { height: 340px; }
+  .hot-stage { height: 380px; }
   .hot-face { padding: 0 5px; }
   .hot-face-card { height: 270px; }
   .hot-face-big { font-size: 56px; }
