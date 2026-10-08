@@ -316,8 +316,10 @@ body::after {
 .hero-h1.intro-visible span:nth-child(2) { opacity: 1; transform: none; transition-delay: 0.22s; }
 .hero-h1.intro-visible span:nth-child(3) { opacity: 1; transform: none; transition-delay: 0.44s; }
 .hero-h1 .outline {
-  -webkit-text-stroke: 2px rgba(244,246,250,0.35);
-  color: transparent;
+  /* Explicit fill + stroke so Safari matches Chrome: Safari draws a bare
+     text-stroke thinner and brighter than Chrome does. */
+  -webkit-text-stroke: 2.5px rgba(244,246,250,0.38);
+  color: rgba(244,246,250,0.08);
 }
 .hero-h1 .accent-solid {
   color: var(--c-accent);
@@ -2100,12 +2102,17 @@ body::after {
   display: flex; align-items: center; justify-content: center;
   perspective: 1000px; cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none;
   outline: none; border-radius: 18px;
-  -webkit-mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent);
-          mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent);
 }
+/* Edge fade as overlays, NOT mask-image: Safari flattens preserve-3d children
+   of a masked element, which turned the cylinder into flat cards. */
+.hot-stage::before, .hot-stage::after {
+  content: ''; position: absolute; top: 0; bottom: 0; width: 12%; z-index: 5; pointer-events: none;
+}
+.hot-stage::before { left: 0;  background: linear-gradient(to right, var(--c-black), transparent); }
+.hot-stage::after  { right: 0; background: linear-gradient(to left,  var(--c-black), transparent); }
 .hot-stage:focus-visible { box-shadow: inset 0 0 0 2px var(--c-accent); }
 .hot-stage.is-dragging { cursor: grabbing; }
-.hot-cyl { position: relative; flex-shrink: 0; height: 100%; display: flex; justify-content: center; transform-style: preserve-3d; will-change: transform; }
+.hot-cyl { -webkit-transform-style: preserve-3d; position: relative; flex-shrink: 0; height: 100%; display: flex; justify-content: center; transform-style: preserve-3d; will-change: transform; }
 .hot-face {
   position: absolute; top: 0; height: 100%;
   display: flex; align-items: center; justify-content: center; padding: 0 8px; box-sizing: border-box;
