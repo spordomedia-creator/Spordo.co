@@ -128,6 +128,13 @@
              onkeydown="if(event.key==='Enter')authReset()">
       <button id="auth-reset-btn" class="auth-btn" onclick="authReset()">Update password</button>
     </div>
+    <!-- Check-your-email step after sign-up (email confirmation is required) -->
+    <div id="auth-form-verify" style="display:none;flex-direction:column;gap:12px">
+      <p class="auth-sub">We sent a confirmation link to <strong id="auth-verify-email"></strong>. Open it to activate your account, then sign in.</p>
+      <p class="auth-sub">Nothing after a few minutes? Check your spam folder, or send it again.</p>
+      <button id="auth-verify-resend-btn" class="auth-btn secondary" onclick="authResendSignup()">Resend confirmation email</button>
+      <button type="button" class="auth-link" onclick="authTab('signin')">Confirmed? Sign in</button>
+    </div>
   </div>
 </div>
 
@@ -3784,7 +3791,7 @@ function authModal(open, tab = 'signin') {
 }
 
 function authTab(tab) {
-  const forms = { signin: 'auth-form-signin', signup: 'auth-form-signup', forgot: 'auth-form-forgot', reset: 'auth-form-reset' };
+  const forms = { signin: 'auth-form-signin', signup: 'auth-form-signup', forgot: 'auth-form-forgot', reset: 'auth-form-reset', verify: 'auth-form-verify' };
   Object.entries(forms).forEach(([k, id]) => {
     const el = document.getElementById(id);
     if (el) el.style.display = (k === tab) ? 'flex' : 'none';
@@ -3818,6 +3825,7 @@ function friendlyAuthError(message) {
   if (m.includes('already registered') || m.includes('already exists')) return 'An account with that email already exists — try signing in instead.';
   if (m.includes('email not confirmed')) return 'Check your inbox to confirm your email before signing in.';
   if (m.includes('rate limit')) return "Too many attempts — give it a minute and try again.";
+  if (m.includes('security purposes')) return 'Please wait a minute before asking for another email.';
   if (m.includes('password')) return 'Password must be at least 8 characters.';
   if (m.includes('email') && (m.includes('invalid') || m.includes('valid'))) return 'That doesn\'t look like a valid email address.';
   return "Something went wrong on our end — give it another try.";
@@ -3842,10 +3850,35 @@ async function authSignUp() {
   if (data?.session?.user) {
     authModal(false);
     _updateNavAccount(data.session.user);
+  } else if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+    // Supabase answers an already-registered email with a user that has no
+    // identities and sends no email, so this is not a new account.
+    authTab('signin');
+    authMsg('An account with that email already exists. Sign in, or use "Forgot password?" to set a new one.', true);
   } else {
-    authMsg('Account created! You can now sign in.', false);
-    setTimeout(() => authTab('signin'), 1500);
+    // Email confirmation is on, so there's no session until the emailed link
+    // is opened, and signing in before then fails ("Email not confirmed").
+    // This used to say "Account created! You can now sign in." and flip to
+    // sign-in, which failed. Show the check-your-email step instead.
+    showVerifyStep(email);
   }
+}
+
+function showVerifyStep(email) {
+  document.getElementById('auth-verify-email').textContent = email;
+  authTab('verify');
+}
+
+// Resend the sign-up confirmation email. The account panel's
+// resendVerification() needs a session, which an unconfirmed user can't get.
+async function authResendSignup() {
+  const email = document.getElementById('auth-verify-email').textContent;
+  if (!email) return;
+  const btn = document.getElementById('auth-verify-resend-btn');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  const { error } = await _sb.auth.resend({ type: 'signup', email });
+  btn.disabled = false; btn.textContent = 'Resend confirmation email';
+  authMsg(error ? friendlyAuthError(error.message) : 'Sent again. It can take a minute or two to arrive.', !!error);
 }
 
 async function authSignIn() {
@@ -3856,6 +3889,11 @@ async function authSignIn() {
   btn.disabled = true; btn.textContent = 'Signing in…';
   const { data, error } = await _sb.auth.signInWithPassword({ email, password: pass });
   btn.disabled = false; btn.textContent = 'Sign In';
+  if (error && /email not confirmed/i.test(error.message)) {
+    showVerifyStep(email);
+    authMsg('Confirm your email first. Open the link we sent, or send it again below.', true);
+    return;
+  }
   if (error) { authMsg(friendlyAuthError(error.message), true); return; }
   authModal(false);
   _updateNavAccount(data.user);
